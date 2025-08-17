@@ -1,0 +1,575 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600&display=swap');
+
+/* Importar fonte Inter do Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Variáveis globais */
+:root {
+    --primary: #223765;
+    --success: #10B981;
+    --warning: #F59E0B;
+    --danger: #EF4444;
+    --text-dark: #111827;
+    --text-light: #6B7280;
+    --bg-light: #F1F5F9;
+    --white: #FFFFFF;
+}
+
+/* Reset e estilos base */
+div.stButton > button {
+    background-color: var(--primary);
+    color: var(--white);
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+}
+
+div.stButton > button:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Sidebar */
+[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
+    width: 250px;
+}
+[data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
+    width: 250px;
+    margin-left: -250px;
+}
+
+/* Sidebar Menu Styling */
+.stSidebar [data-testid="stSidebarNav"] {
+    padding: 1rem 0.5rem !important;
+}
+
+.stSidebar [data-testid="stSidebarNav"] > div {
+    padding: 0.25rem !important;
+}
+
+.stSidebar [data-testid="stSidebarNav"] button,
+.stSidebar [data-testid="stSidebarNav"] a {
+    color: #1E40AF !important;
+    font-weight: 500 !important;
+    font-size: 0.95rem !important;
+    padding: 0.5rem 0.75rem !important;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+}
+
+.stSidebar [data-testid="stSidebarNav"] button:hover,
+.stSidebar [data-testid="stSidebarNav"] a:hover {
+    color: #223765 !important;
+    background-color: rgba(30, 64, 175, 0.08) !important;
+    transform: translateX(2px);
+}
+
+/* Sidebar Styling */
+.stSidebar {
+    background-color: #FFFFFF;
+}
+
+.stSidebar [data-testid="stSidebarNav"] {
+    background-color: transparent;
+}
+
+.stSidebar [data-testid="stSidebarNav"] button {
+    width: 100%;
+    padding: 0.75rem 1rem !important;
+    margin: 0.25rem 0 !important;
+    color: #1E40AF !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0.375rem;
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    transition: all 0.2s ease;
+}
+
+.stSidebar [data-testid="stSidebarNav"] button:hover {
+    background-color: rgba(30, 64, 175, 0.08) !important;
+    transform: translateX(2px);
+}
+
+.stSidebar [data-testid="stSidebarNav"] button[aria-selected="true"] {
+    background-color: rgba(30, 64, 175, 0.12) !important;
+    font-weight: 600 !important;
+}
+
+.stSidebar [data-testid="stMarkdownContainer"] h1 {
+    color: #1E40AF !important;
+    font-size: 1.25rem !important;
+    font-weight: 600 !important;
+    margin-bottom: 1rem !important;
+}
+
+/* Divider styling */
+.stSidebar hr {
+    margin: 0.5rem 0 1rem 0 !important;
+    border-color: rgba(30, 64, 175, 0.1) !important;
+}
+
+/* Cards personalizados */
+.custom-card {
+    background: var(--white);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--bg-light);
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    margin: 1rem 0;
+    transition: transform 0.2s ease;
+}
+
+.custom-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Pills de status */
+.status-pill {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.pill-success {
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+}
+
+.pill-warning {
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    color: var(--warning);
+}
+
+.pill-danger {
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+}
+
+/* Métricas e KPIs */
+[data-testid="stMetricValue"] {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--primary);
+    animation: metric-pulse 2s infinite;
+}
+
+@keyframes metric-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+
+/* Inputs e forms */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stDateInput > div > div > input {
+    border: 2px solid var(--bg-light);
+    border-radius: 0.375rem;
+    padding: 0.5rem;
+    transition: all 0.2s ease;
+}
+
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stDateInput > div > div > input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+/* Animações */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Tabelas */
+.dataframe {
+    border: 1px solid var(--bg-light);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.dataframe th {
+    background-color: var(--bg-light);
+    padding: 0.75rem;
+    font-weight: 600;
+}
+
+.dataframe td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--bg-light);
+}
+
+/* Expanders */
+.streamlit-expanderHeader {
+    background-color: var(--bg-light);
+    border-radius: 0.375rem;
+    border: none;
+    padding: 0.75rem;
+    transition: background-color 0.2s ease;
+}
+
+.streamlit-expanderHeader:hover {
+    background-color: color-mix(in srgb, var(--primary) 5%, var(--bg-light));
+}
+
+/* Estilos gerais */
+.stTextInput > div > div > input {
+    border: 2px solid #4a90e2 !important;
+    border-radius: 5px !important;
+    padding: 10px !important;
+    background-color: #f8f9fa !important;
+}
+
+.stNumberInput > div > div > input {
+    border: 2px solid #4a90e2 !important;
+    border-radius: 5px !important;
+    padding: 10px !important;
+    background-color: #f8f9fa !important;
+}
+
+.stDateInput > div > div > input {
+    border: 2px solid #4a90e2 !important;
+    border-radius: 5px !important;
+    padding: 10px !important;
+    background-color: #f8f9fa !important;
+}
+
+.stSelectbox > div > div > div {
+    border: 2px solid #4a90e2 !important;
+    border-radius: 5px !important;
+    background-color: #f8f9fa !important;
+}
+
+/* Estilo para formulários */
+form {
+    padding: 20px !important;
+    border: 2px solid #e1e4e8 !important;
+    border-radius: 10px !important;
+    background-color: white !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+}
+
+/* Estilo para botões */
+.stButton > button {
+    border: 2px solid #4a90e2 !important;
+    border-radius: 5px !important;
+    padding: 10px 20px !important;
+    background-color: #4a90e2 !important;
+    color: white !important;
+    font-weight: bold !important;
+}
+
+.stButton > button:hover {
+    background-color: #357abd !important;
+    border-color: #357abd !important;
+}
+
+/* Estilo para expanders */
+.streamlit-expanderHeader {
+    border: 2px solid #e1e4e8 !important;
+    border-radius: 5px !important;
+    background-color: #f8f9fa !important;
+    padding: 10px !important;
+}
+
+/* Estilo para métricas */
+[data-testid="stMetricValue"] {
+    background-color: #f8f9fa !important;
+    padding: 10px !important;
+    border-radius: 5px !important;
+    border: 2px solid #e1e4e8 !important;
+}
+
+/* Aplicar fonte Inter globalmente */
+body, 
+[class^="css"],
+[data-testid], 
+.stMarkdown,
+.stButton,
+.stSelectbox,
+.stTextInput,
+.stNumberInput,
+.stDataFrame {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+/* Headings com Inter Bold */
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 700 !important;
+}
+
+/* Métricas com Inter */
+[data-testid="stMetricValue"] {
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 600 !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+}
+
+/* Textos auxiliares com Inter Medium */
+.stMarkdown p,
+.stSubheader,
+[data-testid="stText"] {
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+}
+
+/* Animações */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Mobile-first styles */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.25rem;
+}
+
+.stTabs [data-baseweb="tab"] {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+/* Card containers */
+.card, .custom-card, .metrics-grid {
+    padding: clamp(0.5rem, 2vw, 1rem);
+    margin-bottom: clamp(0.5rem, 2vw, 1rem);
+    border-radius: 0.5rem;
+}
+
+/* Metrics and values */
+.metric-value {
+    font-size: clamp(1rem, 3vw, 1.25rem);
+}
+
+/* Tables and DataFrames */
+[data-testid="stDataFrame"] {
+    font-size: clamp(0.75rem, 2vw, 0.875rem);
+}
+
+/* Forms and inputs */
+[data-testid="stForm"] {
+    padding: clamp(0.75rem, 2vw, 1.25rem) !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+.stButton button {
+    padding: clamp(0.375rem, 1.5vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
+    font-size: clamp(0.875rem, 2vw, 1rem);
+    min-height: 2.5rem;
+}
+
+/* General spacing */
+.block-container {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+.main .block-container {
+    max-width: 100%;
+    padding-left: clamp(0.5rem, 2vw, 1rem);
+    padding-right: clamp(0.5rem, 2vw, 1rem);
+}
+
+/* Improved touch targets for mobile */
+button, select, input {
+    min-height: 2.75rem;
+}
+
+/* Compact sidebar */
+[data-testid="stSidebar"] {
+    width: min(85vw, 300px) !important;
+}
+
+/* Responsive text */
+h1 {
+    font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+h2 {
+    font-size: clamp(1.25rem, 3vw, 1.75rem);
+}
+
+h3 {
+    font-size: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+p {
+    font-size: clamp(0.875rem, 2vw, 1rem);
+}
+
+/* Base Icons */
+.icon-action {
+    font-size: clamp(14px, 1vw, 16px);
+    color: #6B7280;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+}
+
+.icon-trash {
+    font-size: 14px;
+    color: #6B7280;
+}
+
+.icon-trash:hover {
+    color: #EF4444;
+}
+
+.icon-logout {
+    font-size: 16px;
+    color: #6B7280;
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+}
+
+.icon-logout:hover {
+    color: #223765;
+}
+
+/* Mobile-first Layout */
+.stApp {
+    gap: 0.5rem;
+}
+
+.main .block-container {
+    padding: 1rem 0.75rem !important;
+    max-width: 100% !important;
+}
+
+/* Cards and Containers */
+.card, .custom-card {
+    padding: clamp(0.75rem, 2vw, 1rem);
+    margin-bottom: clamp(0.5rem, 2vw, 1rem);
+    border-radius: 0.5rem;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* Typography */
+h1 {
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    margin-bottom: 1rem;
+}
+
+h2 {
+    font-size: clamp(1.25rem, 3vw, 1.75rem);
+}
+
+h3 {
+    font-size: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+p, .metric-label {
+    font-size: clamp(0.875rem, 2vw, 1rem);
+}
+
+/* Forms and Inputs */
+[data-testid="stForm"] {
+    padding: clamp(0.75rem, 2vw, 1.25rem) !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+.stButton button {
+    padding: clamp(0.375rem, 1.5vw, 0.75rem) clamp(0.75rem, 2vw, 1rem);
+    min-height: 2.5rem;
+}
+
+button[kind="secondary"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 0.25rem !important;
+    min-height: auto !important;
+}
+
+/* Streamlit Elements Optimization */
+[data-testid="stMetricValue"] {
+    font-size: clamp(1rem, 2.5vw, 1.25rem) !important;
+}
+
+[data-testid="stDataFrame"] {
+    font-size: clamp(0.75rem, 2vw, 0.875rem) !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    width: min(85vw, 300px) !important;
+}
+
+[data-testid="stSidebarNav"] {
+    padding-top: 1rem !important;
+}
+
+[data-testid="stSidebarNav"] {
+    padding: 0.5rem !important;
+}
+
+[data-testid="stSidebarNav"] button {
+    margin: 0.25rem 0 !important;
+    padding: 0.75rem 1rem !important;
+    color: #1E40AF !important;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+[data-testid="stSidebarNav"] button:hover {
+    color: #223765 !important;
+    background-color: rgba(30, 64, 175, 0.08) !important;
+    transform: translateX(2px);
+}
+
+[data-testid="stSidebarNav"] button[data-testid="stSidebarNav-active"] {
+    background-color: rgba(30, 64, 175, 0.12) !important;
+    font-weight: 600;
+}
+
+/* Responsive Spacing */
+div[data-testid="stVerticalBlock"] {
+    gap: 0.5rem !important;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.5rem !important;
+}
+
+/* Animation optimization */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

@@ -93,6 +93,63 @@ st.set_page_config(
     }
 )
 
+# Otimização de performance para mobile
+st.markdown("""
+    <style>
+        /* Otimização de fonte e carregamento */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap&text=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789');
+        
+        /* Ajustes para mobile */
+        @media (max-width: 640px) {
+            .stApp {
+                padding: 0.5rem !important;
+            }
+            
+            /* Campos de texto e senha mais legíveis */
+            input[type="text"], input[type="password"] {
+                font-size: 16px !important;
+                background-color: white !important;
+                color: #111827 !important;
+                -webkit-text-fill-color: #111827 !important;
+                opacity: 1 !important;
+                border: 1px solid #E5E7EB !important;
+            }
+            
+            /* Melhorar toque em botões */
+            button {
+                min-height: 44px !important;
+                margin: 0.25rem 0 !important;
+            }
+            
+            /* Reduzir tamanho de elementos não essenciais */
+            .stMarkdown p {
+                margin-bottom: 0.5rem !important;
+            }
+            
+            /* Otimizar tabelas */
+            .stDataFrame {
+                font-size: 14px !important;
+            }
+        }
+        
+        /* Melhorias gerais de performance */
+        * {
+            -webkit-font-smoothing: antialiased;
+            box-sizing: border-box;
+        }
+        
+        /* Desativar animações em conexões lentas */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 def inject_styles():
     """Injeta estilos CSS personalizados e fonte Inter"""
     css_path = Path("styles.css")
@@ -363,13 +420,34 @@ def main():
         tab1, tab2 = st.tabs(["Login", "Cadastro"])
         
         with tab1:
-            with st.form("login_form"):
-                username = st.text_input("Usuário")
-                password = st.text_input("Senha", type="password")
+            with st.form("login_form", clear_on_submit=True):
+                st.markdown("""
+                    <style>
+                        input[type="text"], input[type="password"] {
+                            padding: 0.75rem !important;
+                            font-size: 16px !important;
+                            background-color: white !important;
+                            color: #111827 !important;
+                            -webkit-text-fill-color: #111827 !important;
+                            opacity: 1 !important;
+                            border: 2px solid #E5E7EB !important;
+                            border-radius: 0.5rem !important;
+                            width: 100% !important;
+                            margin-bottom: 1rem !important;
+                        }
+                        input[type="text"]:focus, input[type="password"]:focus {
+                            border-color: #1E40AF !important;
+                            box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.2) !important;
+                        }
+                    </style>
+                """, unsafe_allow_html=True)
                 
-                manter_login = st.checkbox("Manter conectado")
+                username = st.text_input("Usuário", key="login_username")
+                password = st.text_input("Senha", type="password", key="login_password")
                 
-                if st.form_submit_button("Entrar"):
+                manter_login = st.checkbox("Manter conectado", key="manter_login")
+                
+                if st.form_submit_button("Entrar", use_container_width=True):
                     with get_db() as db:
                         user = auth_user(db, username, password)
                         if user:
@@ -571,52 +649,99 @@ def main():
             # Lista de Giants existentes
             if giants:
                 st.subheader("Gigantes Ativos")
+                
+                # Preparar dados para a tabela
+                giant_data = []
                 for giant in giants:
-                    # Calcular progresso
                     total_pago = sum(p.amount for p in db.query(GiantPayment).filter_by(giant_id=giant.id).all())
                     restante = giant.total_to_pay - total_pago
                     progresso = (total_pago / giant.total_to_pay) if giant.total_to_pay > 0 else 0
                     
-                    # Card do Giant
-                    st.markdown(f"""
-                    <div style='padding: 1rem; border: 1px solid #e0e0e0; border-radius: 0.5rem; margin-bottom: 1rem'>
-                        <h3>{giant.name} - {money_br(giant.total_to_pay)}</h3>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    ultima_semana = date.today() - timedelta(days=7)
+                    aportes = db.query(GiantPayment).filter_by(giant_id=giant.id).all()
+                    depositos_semana = sum(p.amount for p in aportes if p.date >= ultima_semana)
+                    meta_atingida = depositos_semana >= giant.weekly_goal if giant.weekly_goal else False
                     
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Total Pago", money_br(total_pago))
-                    with col2:
-                        st.metric("Restante", money_br(restante))
-                    with col3:
-                        if giant.weekly_goal:
-                            ultima_semana = date.today() - timedelta(days=7)
-                            aportes = db.query(GiantPayment).filter_by(giant_id=giant.id).all()
-                            depositos_semana = sum(p.amount for p in aportes if p.date >= ultima_semana)
-                            meta_atingida = depositos_semana >= giant.weekly_goal
-                            st.metric(
-                                "Meta Semanal",
-                                f"{money_br(depositos_semana)} / {money_br(giant.weekly_goal)}",
-                                delta="✨" if meta_atingida else f"Faltam {money_br(giant.weekly_goal - depositos_semana)}",
-                                delta_color="normal" if meta_atingida else "inverse"
-                            )
-                    
-                    # Barra de progresso
-                    st.progress(min(1.0, progresso))
-                    
-                    # Botões e ações
-                    col_actions1, col_actions2 = st.columns([3, 1])
-                    with col_actions1:
-                        if giant.interest_rate and hasattr(giant, 'payoff_efficiency'):
-                            st.info(f"""
-                            💹 **Análise:**  Taxa: {giant.interest_rate:.1f}% a.m.  |  
-                            Efficiency: {giant.payoff_efficiency:.2f} R$/1k  |  
-                            Status: {'✅ Pronto!' if progresso >= 0.95 else '⏳ Acumulando'}
-                            """)
-                    with col_actions2:
-                        if st.button("⨯", key=f"del_giant_{giant.id}", type="secondary", help="Excluir"):
-                            st.session_state.confirmar_exclusao[giant.id] = True
+                    giant_data.append({
+                        "ID": giant.id,
+                        "Nome": giant.name,
+                        "Total": giant.total_to_pay,
+                        "Pago": total_pago,
+                        "Restante": restante,
+                        "Progresso": progresso,
+                        "Meta Semanal": f"{money_br(depositos_semana)} / {money_br(giant.weekly_goal)}" if giant.weekly_goal else "-",
+                        "Status": "✅" if progresso >= 0.95 else "⏳",
+                        "Taxa": f"{giant.interest_rate:.1f}%" if giant.interest_rate else "-"
+                    })
+                
+                # Criar DataFrame e mostrar tabela
+                df_giants = pd.DataFrame(giant_data)
+                
+                # Configurar colunas da tabela
+                st.dataframe(
+                    df_giants,
+                    column_config={
+                        "ID": st.column_config.NumberColumn(
+                            "ID",
+                            help="Identificador único do gigante",
+                            width="small"
+                        ),
+                        "Nome": st.column_config.TextColumn(
+                            "Nome",
+                            help="Nome do gigante",
+                            width="medium"
+                        ),
+                        "Total": st.column_config.NumberColumn(
+                            "Total",
+                            help="Valor total a pagar",
+                            format=money_br,
+                            width="medium"
+                        ),
+                        "Pago": st.column_config.NumberColumn(
+                            "Pago",
+                            help="Valor já pago",
+                            format=money_br,
+                            width="medium"
+                        ),
+                        "Restante": st.column_config.NumberColumn(
+                            "Restante",
+                            help="Valor restante",
+                            format=money_br,
+                            width="medium"
+                        ),
+                        "Progresso": st.column_config.ProgressColumn(
+                            "Progresso",
+                            help="Progresso do pagamento",
+                            format="%.0f%%",
+                            min_value=0,
+                            max_value=1
+                        ),
+                        "Meta Semanal": st.column_config.TextColumn(
+                            "Meta Semanal",
+                            help="Meta de pagamento semanal",
+                            width="medium"
+                        ),
+                        "Status": st.column_config.TextColumn(
+                            "Status",
+                            help="Status do pagamento",
+                            width="small"
+                        ),
+                        "Taxa": st.column_config.TextColumn(
+                            "Taxa",
+                            help="Taxa de juros mensal",
+                            width="small"
+                        )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Botão de excluir
+                selected_giant = st.selectbox("Selecione um gigante para excluir:", options=df_giants["Nome"].tolist(), key="select_giant_delete")
+                if selected_giant:
+                    giant_id = df_giants[df_giants["Nome"] == selected_giant]["ID"].iloc[0]
+                    if st.button("🗑️ Excluir Gigante", key=f"del_giant_{giant_id}", type="secondary"):
+                        st.session_state.confirmar_exclusao[giant_id] = True
                     
                     if st.session_state.confirmar_exclusao.get(giant.id):
                         col_confirm1, col_confirm2 = st.columns(2)

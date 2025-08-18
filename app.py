@@ -93,6 +93,95 @@ st.set_page_config(
     }
 )
 
+# Otimizações de performance e responsividade
+st.markdown("""
+    <style>
+        /* Performance */
+        [data-testid="stDecoration"] { display: none }
+        div.block-container { padding-top: 0; padding-bottom: 0; }
+        div[data-testid="stToolbar"] { display: none }
+        
+        /* Responsividade para mobile */
+        @media (max-width: 640px) {
+            .stApp {
+                padding: 0.5rem !important;
+            }
+            
+            /* Campos de formulário */
+            div[data-testid="stForm"] {
+                padding: 0.5rem !important;
+                max-width: 100% !important;
+            }
+            
+            div[data-testid="stForm"] > div:first-child {
+                padding: 0 !important;
+            }
+            
+            /* Inputs */
+            .stTextInput input, .stTextInput div[data-baseweb="input"] {
+                height: 2.5rem !important;
+                min-height: 2.5rem !important;
+                padding: 0.5rem !important;
+                font-size: 16px !important;
+                background-color: white !important;
+                border: 1px solid #E5E7EB !important;
+                border-radius: 0.375rem !important;
+            }
+            
+            .stTextInput label {
+                background: none !important;
+                padding: 0 !important;
+                font-size: 0.875rem !important;
+            }
+            
+            /* Botões */
+            .stButton button {
+                width: 100% !important;
+                padding: 0.625rem !important;
+                height: 2.75rem !important;
+                margin: 0.25rem 0 !important;
+            }
+            
+            /* Textos */
+            .stMarkdown p {
+                font-size: 0.875rem !important;
+                margin: 0.25rem 0 !important;
+            }
+            
+            /* DataFrames */
+            .stDataFrame {
+                font-size: 0.75rem !important;
+            }
+            
+            .stDataFrame [data-testid="stDataFrameDataCell"] {
+                padding: 0.375rem !important;
+            }
+        }
+        
+        /* Otimizações gerais */
+        * {
+            -webkit-font-smoothing: antialiased;
+            box-sizing: border-box;
+        }
+        
+        [data-testid="stSidebar"] [data-testid="stMarkdown"] {
+            min-height: 0;
+        }
+        
+        .stSpinner {
+            opacity: 0.5;
+        }
+        
+        /* Redução de animações */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # Otimização de performance para mobile
 st.markdown("""
     <style>
@@ -352,64 +441,61 @@ def main():
         # ==== Seção de Título e Slogan ====
         st.markdown("""
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@800;900&family=Poppins:wght@700;800;900&display=swap');
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap');
                 
                 [data-testid="stForm"] {
-                    max-width: 400px;
+                    max-width: 100%;
                     margin: 0 auto;
+                    padding: 1rem;
                 }
+                
                 .hero-section {
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    margin: 1.5rem auto;
-                    padding: 1.5rem;
-                    max-width: 600px;
+                    margin: 0.5rem auto;
+                    padding: 0.5rem;
+                    max-width: 100%;
                     text-align: center;
-                    animation: fadeIn 0.8s ease-out;
                 }
-                .brand-emoji {
-                    font-size: 2.5em;
-                    margin-bottom: 0.5rem;
-                    opacity: 0.9;
-                }
+                
                 .brand-title {
-                    font-family: 'Poppins', sans-serif;
-                    font-weight: 900;
-                    font-size: 5em;
-                    line-height: 1;
-                    background: linear-gradient(135deg, #1E40AF 0%, #1E3A8A 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    margin: 0;
-                    padding: 0;
-                    letter-spacing: -0.02em;
-                }
-                .brand-slogan {
                     font-family: 'Inter', sans-serif;
                     font-weight: 600;
-                    font-size: 1.1em;
+                    font-size: 2.5rem;
+                    line-height: 1;
+                    color: #1E40AF;
+                    margin: 0;
+                    padding: 0;
+                }
+                
+                .brand-slogan {
+                    font-family: 'Inter', sans-serif;
+                    font-weight: 500;
+                    font-size: 1rem;
                     color: #10B981;
-                    margin: 0.75rem 0 0 0;
-                    opacity: 0.9;
-                    letter-spacing: -0.01em;
+                    margin: 0.5rem 0 1rem 0;
                 }
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(-20px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                @keyframes float {
-                    0%, 100% { transform: translateY(0); }
-                    50% { transform: translateY(-10px); }
-                }
-                @keyframes pulse {
-                    0%, 100% { transform: scale(1); opacity: 0.5; }
-                    50% { transform: scale(1.1); opacity: 0.7; }
+                
+                /* Ajustes responsivos */
+                @media (max-width: 640px) {
+                    .hero-section {
+                        margin: 0;
+                        padding: 0.5rem 0;
+                    }
+                    .brand-title {
+                        font-size: 2rem;
+                    }
+                    .brand-slogan {
+                        font-size: 0.875rem;
+                    }
+                    [data-testid="stForm"] {
+                        padding: 0.5rem;
+                    }
                 }
             </style>
             <div class="hero-section">
-                <div class="brand-emoji">🎯</div>
                 <h1 class="brand-title">DAVI</h1>
                 <h3 class="brand-slogan">Vença seus gigantes financeiros</h3>
             </div>
@@ -423,21 +509,64 @@ def main():
             with st.form("login_form", clear_on_submit=True):
                 st.markdown("""
                     <style>
-                        input[type="text"], input[type="password"] {
-                            padding: 0.75rem !important;
+                        /* Container do formulário */
+                        section[data-testid="stForm"] {
+                            padding: 0 !important;
+                            max-width: 100% !important;
+                        }
+                        
+                        /* Campos de texto */
+                        .stTextInput input {
+                            height: 2.75rem !important;
                             font-size: 16px !important;
                             background-color: white !important;
                             color: #111827 !important;
                             -webkit-text-fill-color: #111827 !important;
                             opacity: 1 !important;
-                            border: 2px solid #E5E7EB !important;
-                            border-radius: 0.5rem !important;
-                            width: 100% !important;
-                            margin-bottom: 1rem !important;
+                            border: 1px solid #E5E7EB !important;
+                            border-radius: 0.375rem !important;
+                            padding: 0 0.75rem !important;
+                            margin: 0 !important;
                         }
-                        input[type="text"]:focus, input[type="password"]:focus {
+                        
+                        /* Foco nos campos */
+                        .stTextInput input:focus {
                             border-color: #1E40AF !important;
-                            box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.2) !important;
+                            box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.1) !important;
+                        }
+                        
+                        /* Labels */
+                        .stTextInput label {
+                            padding: 0 !important;
+                            margin-bottom: 0.25rem !important;
+                            color: #374151 !important;
+                            font-size: 0.875rem !important;
+                            font-weight: 500 !important;
+                        }
+                        
+                        /* Botão de submit */
+                        .stButton button {
+                            width: 100% !important;
+                            height: 2.75rem !important;
+                            background-color: #1E40AF !important;
+                            color: white !important;
+                            font-weight: 500 !important;
+                            margin-top: 0.5rem !important;
+                        }
+                        
+                        /* Checkbox */
+                        .stCheckbox label {
+                            font-size: 0.875rem !important;
+                            color: #374151 !important;
+                        }
+                        
+                        @media (max-width: 640px) {
+                            .stTextInput input {
+                                height: 2.5rem !important;
+                            }
+                            .stButton button {
+                                height: 2.5rem !important;
+                            }
                         }
                     </style>
                 """, unsafe_allow_html=True)

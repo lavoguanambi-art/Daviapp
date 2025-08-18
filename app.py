@@ -622,15 +622,23 @@ def main():
                         col_confirm1, col_confirm2 = st.columns(2)
                         with col_confirm1:
                             if st.button("✅ Confirmar", key=f"confirm_yes_{giant.id}"):
-                                db.query(GiantPayment).filter_by(giant_id=giant.id).delete()
-                                db.delete(giant)
-                                db.commit()
-                                st.success("Gigante excluído!")
-                                st.session_state.confirmar_exclusao[giant.id] = False
-                                st.rerun()
+                                try:
+                                    # Primeiro excluir os pagamentos
+                                    db.query(GiantPayment).filter_by(giant_id=giant.id).delete()
+                                    # Depois excluir o gigante
+                                    db.delete(giant)
+                                    db.commit()
+                                    st.success("Gigante excluído com sucesso!")
+                                    # Limpar o estado de confirmação
+                                    del st.session_state.confirmar_exclusao[giant.id]
+                                    time.sleep(0.5)  # Pequena pausa para garantir que a UI atualize
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao excluir: {str(e)}")
+                                    db.rollback()
                         with col_confirm2:
                             if st.button("❌ Cancelar", key=f"confirm_no_{giant.id}"):
-                                st.session_state.confirmar_exclusao[giant.id] = False
+                                del st.session_state.confirmar_exclusao[giant.id]
                                 st.rerun()
                     
                     # Form para aporte

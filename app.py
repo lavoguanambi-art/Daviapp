@@ -674,41 +674,21 @@ def main():
                         "Taxa": f"{giant.interest_rate:.1f}%" if giant.interest_rate else "-"
                     })
                 
-                # Criar DataFrame e mostrar tabela
+                # Criar DataFrame e formatar valores monetários antes
                 df_giants = pd.DataFrame(giant_data)
+                df_giants["Total"] = df_giants["Total"].apply(money_br)
+                df_giants["Pago"] = df_giants["Pago"].apply(money_br)
+                df_giants["Restante"] = df_giants["Restante"].apply(money_br)
                 
                 # Configurar colunas da tabela
                 st.dataframe(
                     df_giants,
                     column_config={
-                        "ID": st.column_config.NumberColumn(
-                            "ID",
-                            help="Identificador único do gigante",
-                            width="small"
-                        ),
-                        "Nome": st.column_config.TextColumn(
-                            "Nome",
-                            help="Nome do gigante",
-                            width="medium"
-                        ),
-                        "Total": st.column_config.NumberColumn(
-                            "Total",
-                            help="Valor total a pagar",
-                            format=money_br,
-                            width="medium"
-                        ),
-                        "Pago": st.column_config.NumberColumn(
-                            "Pago",
-                            help="Valor já pago",
-                            format=money_br,
-                            width="medium"
-                        ),
-                        "Restante": st.column_config.NumberColumn(
-                            "Restante",
-                            help="Valor restante",
-                            format=money_br,
-                            width="medium"
-                        ),
+                        "ID": "ID",
+                        "Nome": "Nome",
+                        "Total": "Total",
+                        "Pago": "Pago",
+                        "Restante": "Restante",
                         "Progresso": st.column_config.ProgressColumn(
                             "Progresso",
                             help="Progresso do pagamento",
@@ -716,21 +696,9 @@ def main():
                             min_value=0,
                             max_value=1
                         ),
-                        "Meta Semanal": st.column_config.TextColumn(
-                            "Meta Semanal",
-                            help="Meta de pagamento semanal",
-                            width="medium"
-                        ),
-                        "Status": st.column_config.TextColumn(
-                            "Status",
-                            help="Status do pagamento",
-                            width="small"
-                        ),
-                        "Taxa": st.column_config.TextColumn(
-                            "Taxa",
-                            help="Taxa de juros mensal",
-                            width="small"
-                        )
+                        "Meta Semanal": "Meta Semanal",
+                        "Status": "Status",
+                        "Taxa": "Taxa Mensal"
                     },
                     hide_index=True,
                     use_container_width=True

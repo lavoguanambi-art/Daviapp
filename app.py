@@ -1,12 +1,281 @@
+# --- imports robustos ---
+try:
+    from db import engine, SessionLocal, Base
+except Exception:
+    from .db import engine, SessionLocal, Base  # quando rodar como pacote
+
 import streamlit as st
-from pathlib import Path
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import time, math, io, hashlib, os
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select, text, inspect
-from db import engine, SessionLocal, Base
+
+from services.giants import delete_giant
+from services.movements import create_income
+from services.buckets import split_income_by_buckets
+from ui import inject_mobile_ui, hamburger, bottom_nav
+
+# Cache da sessão do banco
+@st.cache_resource
+def _session_factory():
+    return SessionLocal
+
+def get_db():
+    return _session_factory()()
+
+def load_user_data(db: Session, user_id: int) -> dict:
+    """Carrega todos os dados do usuário."""
+    try:
+        # Carrega dados do usuário
+        profile = db.get(User, user_id)
+        if not profile:
+            raise Exception("Usuário não encontrado")
+
+        # Carrega configurações e dados associados
+        buckets = load_user_buckets(user_id) 
+        giants = load_user_giants(user_id)
+        movements, total = load_user_movements(user_id)
+        bills = load_user_bills(user_id)
+
+        return {
+            'profile': profile,
+            'buckets': buckets,
+            'giants': giants, 
+            'movements': movements,
+            'total': total,
+            'bills': bills
+        }
+
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {str(e)}")
+        return None
+
+# --- Login e autenticação ---
+def init_auth():
+    """Inicializa o sistema de autenticação."""
+    if "user" not in st.session_state:
+        st.session_state.user = None
+        
+    if "login_error" not in st.session_state:
+        st.session_state.login_error = None
+
+def auth_required(func):
+    """Decorator para garantir que o usuário está autenticado."""
+    def wrapper(*args, **kwargs):
+        init_auth()
+        if not st.session_state.user:
+            show_login()
+            return
+        return func(*args, **kwargs)
+    return wrapper
+
+def logout():
+    """Faz logout do usuário."""
+    if "user" in st.session_state:
+        del st.session_state.user
+    if "user_data" in st.session_state:
+        del st.session_state.user_data
+    st.rerun()
+
+def show_login():
+    """Exibe o formulário de login."""
+    inject_mobile_ui()
+    
+    # Adiciona menu hamburguer para mobile
+    hamburger()
+    
+    with st.form("login_form", clear_on_submit=True):
+        username = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        
+        col1, col2 = st.columns([3,1])
+        with col1:
+            submitted = st.form_submit_button("Login")
+        with col2:
+            st.markdown("*Contate o admin*")
+            
+        if submitted:
+            try:
+                db = get_db()
+                user = auth_user(db, username, password)
+                if user:
+                    st.session_state.user = user.id
+                    st.success("Login realizado com sucesso!")
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha inválidos")
+            except Exception as e:
+                st.error(f"Erro ao fazer login: {str(e)}")
+
+# Importar funções otimizadas
+from utils import money_br, date_br
+from giant_manager import render_plano_ataque, get_giant_payments, get_total_paid
+from db_helpers import (tx, init_db_pragmas, delete_giant, distribuir_por_baldes, 
+                       giant_forecast, check_giant_victory)
+from app_utils import (safe_dataframe, dias_do_mes, ensure_daily_allocation, 
+                      daily_budget_for_giants, celebrate_victory)
+
+# Performance Configuration
+st.set_page_config(
+    page_title="DAVI",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+    menu_items={'About': 'App DAVI - Controle Financeiro'}
+)
+
+# Mobile first & UI improvements
+st.markdown("""
+<style>
+div.block-container{max-width:900px;padding:0.5rem 1rem;}
+@media (max-width:480px){
+  div.block-container{padding:0.25rem 0.5rem;}
+  .stTextInput input,.stNumberInput input,.stDateInput input{height:44px;font-size:16px;}
+  .stButton button{height:44px}
+}
+.stCheckbox > label{display:flex;gap:.5rem;align-items:center;white-space:nowrap;}
+.header-bar{display:flex;align-items:center;gap:.5rem;margin:.5rem 0 1rem;}
+.burger{font-size:24px;line-height:24px;padding:.25rem .5rem;border-radius:8px;border:1px solid #1f293733;}
+.brand{color:#1E40AF;font-weight:800;letter-spacing:.5px;}
+.slogan{color:#10B981;opacity:.9;}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="header-bar">
+  <span class="burger">☰</span>
+  <div>
+    <div class="brand">DAVI</div>
+    <div class="slogan">Vença seus gigantes financeiros</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Cache functions to improve performance
+@st.cache_data(ttl=300)
+def get_giant_payments(giant_id):
+    with get_db() as db:
+        return db.query(GiantPayment).filter_by(giant_id=giant_id).all()
+
+@st.cache_data(ttl=300)
+def get_total_paid(giant_id):
+    payments = get_giant_payments(giant_id)
+    return sum(p.amount for p in payments)
+
+# Função segura para operações no banco de dados
+def safe_operation(operation_func):
+    try:
+        with get_db() as db:
+            result = operation_func(db)
+            return result
+    except Exception as e:
+        st.error(f"Erro na operação: {str(e)}")
+        return False
+
+# Performance Optimizations
+st.markdown("""
+<style>
+    /* Performance Optimizations */
+    * {
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        box-sizing: border-box;
+    }
+
+    /* Reduce Repaints */
+    .stApp {
+        transform: translateZ(0);
+        backface-visibility: hidden;
+        perspective: 1000px;
+    }
+
+    /* Form Input Styles */
+    div[data-testid="stTextInput"] {
+        width: 100% !important;
+        max-width: 400px !important;
+        margin: 0 auto !important;
+    }
+    
+    div[data-testid="stForm"] {
+        max-width: 400px !important;
+        margin: 0 auto !important;
+        padding: 1rem !important;
+    }
+
+    /* Mobile Optimizations */
+    [data-testid="stSidebar"] {
+        min-width: unset !important;
+        width: auto !important;
+        flex-shrink: 0 !important;
+        will-change: transform;
+    }
+
+    /* Optimize touch interactions */
+    button, [role="button"], a {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Responsive layout */
+    @media (max-width: 640px) {
+        .main { padding: 0.5rem !important; }
+        .stApp { overflow: auto !important; }
+        div[data-testid="stForm"] { padding: 0.5rem !important; }
+        div[data-testid="stVerticalBlock"] { gap: 0.5rem !important; }
+        
+        /* Optimize scrolling */
+        .main > div:first-child {
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Optimize tables for mobile */
+        [data-testid="stDataFrame"] {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            background:
+                linear-gradient(to right, white 30%, rgba(255,255,255,0)),
+                linear-gradient(to right, rgba(255,255,255,0), white 70%) 100% 0,
+                radial-gradient(farthest-side at 0% 50%, rgba(0,0,0,.2), rgba(0,0,0,0)),
+                radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.2), rgba(0,0,0,0)) 100% 0;
+            background-repeat: no-repeat;
+            background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+            background-attachment: local, local, scroll, scroll;
+        }
+
+        /* Optimize forms */
+        input, select, textarea {
+            font-size: 16px !important; /* Prevent zoom on iOS */
+        }
+    }
+
+    /* Reduce layout shifts */
+    [data-testid="stMetricValue"] {
+        min-height: 1.5em;
+    }
+
+    /* Hide decorations */
+    [data-testid="stDecoration"],
+    footer,
+    #MainMenu { 
+        display: none !important;
+    }
+
+    /* Optimize data editor */
+    [data-testid="stDataEditor"] {
+        max-height: 70vh;
+        overflow: auto;
+    }
+</style>
+""", unsafe_allow_html=True)
+from database import (
+    engine, get_db, safe_operation,
+    batch_operation, retry_operation
+)
+from models import Base
 from models import (
     User, Bucket, Giant, Movement, Bill,
     UserProfile, GiantPayment
@@ -14,6 +283,12 @@ from models import (
 from babel.numbers import format_currency
 from babel.dates import format_date
 import matplotlib.pyplot as plt
+from ui_utils import (
+    mobile_friendly_button,
+    mobile_friendly_table,
+    show_confirmation_dialog,
+    show_action_buttons
+)
 
 # Configurar estilo do Matplotlib
 plt.style.use('default')  # Usar estilo padrão
@@ -33,6 +308,82 @@ plt.rcParams.update({
     'axes.labelsize': 12,
     'axes.titlesize': 14
 })
+
+# Otimizações de CSS global para formulários
+st.markdown("""
+<style>
+    /* Reset de formulário */
+    div[data-testid="stForm"] {
+        width: 100% !important;
+        max-width: 420px !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+    }
+
+    /* Container de input consistente */
+    .stTextInput, 
+    div[data-baseweb="input"],
+    div[data-baseweb="base-input"] {
+        margin: 0 0 1rem 0 !important;
+    }
+
+    /* Altura consistente para inputs */
+    .stTextInput > div > div > input,
+    .stTextInput input,
+    div[data-baseweb="input"] div,
+    div[data-baseweb="base-input"] div,
+    [data-testid="stFormSubmitButton"] button {
+        box-sizing: border-box !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        max-height: 44px !important;
+        font-size: 16px !important;
+    }
+
+    /* Estilos consistentes para inputs */
+    .stTextInput > div > div > input,
+    div[data-baseweb="input"] input {
+        padding: 8px 12px !important;
+        border: 1px solid #E5E7EB !important;
+        border-radius: 6px !important;
+        background: white !important;
+        color: #111827 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        line-height: normal !important;
+    }
+
+    /* Container do botão */
+    [data-testid="stFormSubmitButton"] {
+        margin-top: 1rem !important;
+    }
+
+    /* Botão de submit */
+    [data-testid="stFormSubmitButton"] button {
+        width: 100% !important;
+        margin: 0 !important;
+        border-radius: 6px !important;
+        background: #1E40AF !important;
+        color: white !important;
+        border: none !important;
+        font-weight: 500 !important;
+        padding: 0.5rem 1rem !important;
+    }
+
+    /* Otimização para toque */
+    input, button {
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: transparent !important;
+    }
+
+    /* Prevenção de zoom */
+    @media (max-width: 480px) {
+        input, select, textarea {
+            font-size: 16px !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ============ Helpers BR ============
 def money_br(v: float) -> str:
@@ -87,7 +438,61 @@ def parse_money_br(s: str) -> float:
 # Configurações otimizadas para mobile
 st.set_page_config(
     page_title="DAVI",
-    layout="centered",  # Mudado para centered para melhor performance
+    layout="centered"  # Centered for better performance
+)
+
+st.markdown("""
+<style>
+/* Reset visual noise */
+[data-testid="stDecoration"], footer, #MainMenu, div[data-testid="stStatusWidget"] { display: none !important; }
+.block-container { padding-top: .25rem; padding-bottom: .5rem; }
+
+/* Simple and readable typography */
+html, body, [data-testid], .stMarkdown, .stText, .stButton, .stDataFrame {
+  -webkit-font-smoothing: antialiased;
+  font-family: -apple-system, system-ui, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+/* Forms: full width and no text breaking */
+[data-testid="stForm"] { max-width: 420px; margin: .5rem auto; padding: .75rem .75rem; }
+.stTextInput > div > div > input,
+.stPassword > div > div > input,
+.stNumberInput > div > div > input,
+.stDateInput > div > div > input {
+  height: 44px !important; font-size: 16px !important;
+  border: 1px solid #E5E7EB !important; border-radius: 8px !important;
+}
+[data-testid="stCheckbox"] label { white-space: nowrap !important; }  /* Keep "Manter conectado" in one line */
+
+/* Larger buttons for touch */
+.stButton button {
+  min-height: 44px; font-weight: 600; border-radius: 10px;
+}
+button[kind="primary"] { background: #1E40AF !important; color: #fff !important; }
+button[kind="secondary"] { color: #1E40AF !important; border-color: #1E40AF !important; }
+
+/* Dataframes: horizontal scroll on mobile, fixed header */
+[data-testid="stDataFrame"] div[role="table"] { overflow-x: auto; }
+[data-testid="stDataFrame"] { font-size: 14px; }
+
+/* Harmonized sidebar + visual "hamburger" */
+section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] button { color: #1E40AF !important; }
+.stApp:before {
+  content: "☰"; position: fixed; left: 14px; top: 12px; z-index: 999;
+  font-size: 22px; color: #1E40AF; opacity: .9;
+}
+/* Avoid overwriting native Safari icons */
+@supports (-webkit-touch-callout: none) {
+  .stApp:before { top: 10px; }
+}
+
+/* iOS/Safari dark mode: maintain contrast */
+@media (prefers-color-scheme: dark) {
+  body { background: #0b0f15 !important; }
+}
+</style>
+""", unsafe_allow_html=True)
     initial_sidebar_state="collapsed",
     menu_items={
         'About': 'App DAVI - Controle Financeiro Inteligente'
@@ -325,12 +730,37 @@ inject_styles()
 
 # ============ Session State Initialization ============
 def init_session_state():
-    # Verificar cookie de autenticação
-    if "authenticated" not in st.session_state:
-        saved_user = st.session_state.get("saved_user", None)
-        if saved_user:
-            st.session_state.authenticated = True
-            st.session_state.user = saved_user
+    """Initialize session state variables."""
+    # Garante que temos um usuário autenticado
+    if 'user' not in st.session_state or not st.session_state.user:
+        return
+
+    # Set up default session state values
+    if 'user_data' not in st.session_state:
+        db = get_db()
+        st.session_state.user_data = load_user_data(db, st.session_state.user)
+        
+    # Inicializa eventos
+    if 'events' not in st.session_state:
+        st.session_state.events = []
+        
+def handle_delete_giant(giant_id: int):
+    """Manipula o evento de exclusão de gigante."""
+    try:
+        db = get_db()
+        if delete_giant(db, st.session_state.user, giant_id):
+            st.success(f"Gigante excluído com sucesso!")
+            st.rerun()
+        else:
+            st.error("Não foi possível excluir o gigante.")
+    except Exception as e:
+        st.error(f"Erro ao excluir: {str(e)}")
+
+def init_session_data():
+    """Inicializa dados da sessão."""
+    if 'user_data' not in st.session_state:
+        db = get_db()
+        st.session_state.user_data = load_user_data(db, st.session_state.user)
         else:
             st.session_state.authenticated = False
     if "user" not in st.session_state:
@@ -382,42 +812,49 @@ def logout():
 def init_db():
     try:
         db_exists = os.path.exists("./sql_app.db")
-        columns = set()
         
-        # Criar banco de dados se não existir
+        # Create database if it doesn't exist
         if not db_exists:
             Base.metadata.create_all(bind=engine)
             st.success("Banco de dados criado com sucesso!")
             return
         
-        # Verificar e adicionar novas colunas
-        with engine.connect() as conn:
+        # Check and add new columns using context manager
+        with get_db_session() as db:
             try:
-                # Verificar se a tabela existe usando inspect (método moderno)
                 inspector = inspect(engine)
                 tables = inspector.get_table_names()
                 
+                # Verificar e adicionar colunas em giants
                 if 'giants' in tables:
                     columns = {col['name'] for col in inspector.get_columns('giants')}
                     needed_columns = {'weekly_goal', 'interest_rate', 'payoff_efficiency'}
                     missing_columns = needed_columns - columns
                     
-                    # Adicionar colunas faltantes
+                    # Add missing columns in giants
                     for col in missing_columns:
                         try:
-                            conn.execute(text(f"ALTER TABLE giants ADD COLUMN {col} FLOAT DEFAULT 0.0"))
-                            st.success(f"Coluna {col} adicionada com sucesso!")
+                            db.execute(text(f"ALTER TABLE giants ADD COLUMN {col} FLOAT DEFAULT 0.0"))
+                            st.success(f"Coluna {col} adicionada à tabela giants")
                         except Exception as col_error:
-                            st.warning(f"Erro ao adicionar coluna {col}: {str(col_error)}")
+                            st.warning(f"Erro ao adicionar coluna {col} em giants: {str(col_error)}")
+                
+                # Verificar e adicionar last_allocation_date em user_profiles
+                if 'user_profiles' in tables:
+                    columns = {col['name'] for col in inspector.get_columns('user_profiles')}
+                    if 'last_allocation_date' not in columns:
+                        try:
+                            db.execute(text("ALTER TABLE user_profiles ADD COLUMN last_allocation_date DATE"))
+                            st.success("Coluna last_allocation_date adicionada à tabela user_profiles")
+                        except Exception as col_error:
+                            st.warning(f"Erro ao adicionar last_allocation_date: {str(col_error)}")
                     
-                    if missing_columns:
-                        conn.commit()
+                    if missing_columns or 'last_allocation_date' not in columns:
                         st.success("Banco de dados atualizado com sucesso!")
                 
             except Exception as table_error:
                 st.error(f"Erro ao verificar tabelas: {str(table_error)}")
                 try:
-                    # Tentar recriar o banco em caso de erro grave
                     Base.metadata.create_all(bind=engine)
                     st.success("Banco de dados recriado com sucesso!")
                 except Exception as recreate_error:
@@ -429,17 +866,14 @@ def init_db():
 
 init_db()
 
-def get_db() -> Session:
-    return SessionLocal()
-
-def get_or_create_user(db: Session, name: str) -> User:
-    u = db.execute(select(User).where(User.name == name)).scalar_one_or_none()
-    if u: return u
-    u = User(name=name)
-    db.add(u)
-    db.commit()
-    db.refresh(u)
-    return u
+def get_or_create_user(name: str) -> User:
+    with get_db_session() as db:
+        u = db.execute(select(User).where(User.name == name)).scalar_one_or_none()
+        if u: 
+            return u
+        u = User(name=name)
+        db.add(u)
+        return u  # Session will be committed by context manager
 
 # ============ Data loaders ============
 def load_buckets(db: Session, user_id: int):
@@ -470,11 +904,16 @@ def get_profile(db: Session, user_id: int) -> UserProfile:
 def hash_password(plain: str) -> str:
     return hashlib.sha256(plain.encode("utf-8")).hexdigest()
 
+@retry_operation(retries=3)
 def auth_user(db: Session, username: str, password: str) -> Optional[User]:
-    user = db.execute(select(User).where(User.name == username)).scalar_one_or_none()
-    if user and user.password_hash == hash_password(password):
-        return user
-    return None
+    try:
+        user = db.execute(select(User).where(User.name == username)).scalar_one_or_none()
+        if user and user.password_hash == hash_password(password):
+            return user
+        return None
+    except Exception as e:
+        st.error(f"Erro ao autenticar: {str(e)}")
+        return None
 
 def create_user(db: Session, username: str, password: str) -> User:
     hashed_pwd = hash_password(password)
@@ -484,23 +923,95 @@ def create_user(db: Session, username: str, password: str) -> User:
     db.refresh(user)
     return user
 
+@st.cache_resource
+def get_cached_engine():
+    """Cache database engine to reuse connections"""
+    return engine
+
+@st.cache_data(ttl=300)
+def load_user_profile(user_id: int):
+    """Cache user profile separately as it changes rarely"""
+    with get_db() as db:
+        return get_profile(db, user_id)
+
+@st.cache_data(ttl=60)
+def load_user_buckets(user_id: int):
+    """Cache buckets with shorter TTL as they change more often"""
+    with get_db() as db:
+        return load_buckets(db, user_id)
+
+@st.cache_data(ttl=60)
+def load_user_giants(user_id: int):
+    """Cache giants separately"""
+    with get_db() as db:
+        return load_giants(db, user_id)
+
+@st.cache_data(ttl=60)
+def load_user_bills(user_id: int):
+    """Cache bills separately"""
+    with get_db() as db:
+        return load_bills(db, user_id)
+
+@st.cache_data(ttl=30)
+def load_user_movements(user_id: int, page: int = 1, per_page: int = 50):
+    """Cache movements with pagination for better performance"""
+    with get_db() as db:
+        total = db.query(Movement).filter(Movement.user_id == user_id).count()
+        movements = db.query(Movement).filter(Movement.user_id == user_id)\
+            .order_by(Movement.date.desc())\
+            .offset((page-1) * per_page)\
+            .limit(per_page)\
+            .all()
+        return movements, total
+
 @st.cache_data(ttl=300)
 def load_cached_data(user_id: int):
-    with get_db() as db:
-        profile = get_profile(db, user_id)
-        buckets = load_buckets(db, user_id)
-        giants = load_giants(db, user_id)
-        movements = load_movements(db, user_id)
-        bills = load_bills(db, user_id)
-        return profile, buckets, giants, movements, bills
+    """Load data efficiently with separate caches"""
+    profile = load_user_profile(user_id)
+    buckets = load_user_buckets(user_id)
+    giants = load_user_giants(user_id)
+    bills = load_user_bills(user_id)
+    movements, _ = load_user_movements(user_id, page=1)
+    return profile, buckets, giants, movements, bills
 
-@st.cache_resource
-def get_cached_db():
-    return SessionLocal()
-
+@auth_required
 def main():
-    # Inicializar todas as variáveis de estado
+    # Initialize all state variables and database session
     init_session_state()
+    inject_mobile_ui() # Injeta CSS mobile-first
+    
+    # Add mobile viewport meta tag
+    st.markdown(
+        """
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <style>
+            [data-testid="stSidebar"] {
+                min-width: unset !important;
+                width: auto !important;
+                flex-shrink: 0 !important;
+            }
+            
+            @media (max-width: 640px) {
+                .main {
+                    padding: 0.5rem !important;
+                }
+                
+                .stApp {
+                    overflow: auto !important;
+                }
+                
+                div[data-testid="stForm"] {
+                    padding: 0.5rem !important;
+                }
+                
+                div[data-testid="stVerticalBlock"] {
+                    gap: 0.5rem !important;
+                }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     if not st.session_state.authenticated:
         # ==== Seção de Título e Slogan ====
@@ -540,6 +1051,36 @@ def main():
                     margin: 0.5rem auto;
                     max-width: 320px;
                 }
+
+                /* Login form specific styles */
+                .element-container:has(> [data-testid="stTextInput"]),
+                .element-container:has(> [data-testid="stPasswordInput"]) {
+                    width: 100% !important;
+                    max-width: none !important;
+                    margin-bottom: 1rem !important;
+                }
+
+                [data-testid="stForm"] [data-testid="stTextInput"] > div,
+                [data-testid="stForm"] [data-testid="stPasswordInput"] > div {
+                    width: 100% !important;
+                    max-width: none !important;
+                }
+
+                [data-testid="stForm"] input {
+                    width: 100% !important;
+                    height: 44px !important;
+                    padding: 0.5rem 1rem !important;
+                    font-size: 16px !important;
+                    border: 1px solid #E5E7EB !important;
+                    border-radius: 6px !important;
+                    background: white !important;
+                }
+
+                /* Fix for checkbox alignment */
+                [data-testid="stForm"] [data-testid="stCheckbox"] {
+                    margin-top: 0.5rem !important;
+                    margin-bottom: 1rem !important;
+                }
                 
                 /* Mobile otimizado */
                 @media (max-width: 480px) {
@@ -569,23 +1110,51 @@ def main():
         tab1, tab2 = st.tabs(["Login", "Cadastro"])
         
         with tab1:
-            with st.form("login_form", clear_on_submit=True):
-                # Estilo otimizado para formulário
+            # Container para melhor organização do formulário
+            with st.container():
+                with st.form("login_form", clear_on_submit=True):
+                    # Estilo otimizado para formulário e verificação de carregamento
+                    st.markdown("<!-- Form loaded -->", unsafe_allow_html=True)
                 st.markdown("""
                     <style>
-                        /* Form Container */
-                        div[data-testid="stForm"] {
-                            background: white;
-                            border-radius: 8px;
-                            padding: 1rem !important;
+                        /* Reset Form Styles */
+                        div[data-testid="stForm"] > div:first-child {
+                            width: 100% !important;
                             max-width: 320px !important;
                             margin: 0 auto !important;
+                            background: white;
+                            border-radius: 8px;
+                            padding: 1.25rem !important;
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                         }
-                        
-                        /* Input fields */
-                        .stTextInput input {
+
+                        /* Consistent Input Styling */
+                        .stTextInput > div,
+                        .stTextInput div[data-baseweb="input"],
+                        div[data-baseweb="base-input"],
+                        [data-testid="stTextInput"] input,
+                        [data-testid="stTextInput"] div[data-baseweb="input"] {
                             width: 100% !important;
+                            min-height: 44px !important;
                             height: 44px !important;
+                            max-height: 44px !important;
+                            line-height: 44px !important;
+                            box-sizing: border-box !important;
+                        }
+
+                        /* Força todos os inputs a terem o mesmo tamanho */
+                        [data-testid="stTextInput"],
+                        [data-testid="stPasswordInput"] {
+                            width: 100% !important;
+                            margin: 0 auto 1rem auto !important;
+                        }
+
+                        /* Estilo consistente para todos os inputs */
+                        .stTextInput input,
+                        .stPasswordInput input,
+                        input[type="text"],
+                        input[type="password"] {
+                            width: 100% !important;
                             padding: 8px 12px !important;
                             font-size: 16px !important;
                             border: 1px solid #E5E7EB !important;
@@ -593,9 +1162,27 @@ def main():
                             background: white !important;
                             color: #111827 !important;
                             margin: 4px 0 !important;
+                            appearance: none !important;
+                            -webkit-appearance: none !important;
+                            box-sizing: border-box !important;
                         }
-                        
-                        /* Submit button */
+
+                        /* Fix Password Input */
+                        div[data-baseweb="input"] {
+                            height: 44px !important;
+                            min-height: 44px !important;
+                            background: white !important;
+                        }
+
+                        /* Consistent Label Styling */
+                        .stTextInput label,
+                        .stPassword label {
+                            color: #374151 !important;
+                            font-size: 14px !important;
+                            margin-bottom: 4px !important;
+                        }
+
+                        /* Button Styling */
                         .stButton > button {
                             width: 100% !important;
                             height: 44px !important;
@@ -607,36 +1194,82 @@ def main():
                             font-weight: 500 !important;
                             margin: 8px 0 !important;
                             cursor: pointer !important;
+                            transition: background-color 0.2s ease;
                         }
-                        
-                        /* Mobile adjustments */
+
+                        .stButton > button:hover {
+                            background: #1C3879 !important;
+                        }
+
+                        /* Fix Input Spacing */
+                        .stTextInput,
+                        .stPassword {
+                            margin-bottom: 1rem !important;
+                        }
+
+                        /* Checkbox Alignment */
+                        [data-testid="stCheckbox"] {
+                            margin: 0.5rem 0 1rem !important;
+                        }
+
+                        /* Mobile Optimization */
                         @media (max-width: 480px) {
-                            div[data-testid="stForm"] {
-                                padding: 12px !important;
+                            div[data-testid="stForm"] > div:first-child {
+                                padding: 1rem !important;
                             }
-                            .stTextInput input {
-                                height: 40px !important;
-                            }
+                            
+                            .stTextInput input,
+                            .stPassword input,
+                            div[data-baseweb="input"],
                             .stButton > button {
-                                height: 40px !important;
+                                height: 44px !important;
+                                font-size: 16px !important; /* Prevent zoom on iOS */
                             }
                         }
                     </style>
                 """, unsafe_allow_html=True)
                 
-                username = st.text_input("Usuário", key="login_username")
-                password = st.text_input("Senha", type="password", key="login_password")
+                # Inputs com tamanho consistente
+                username = st.text_input(
+                    "Usuário",
+                    key="login_username",
+                    placeholder="Digite seu usuário",
+                    help="Nome de usuário para acesso"
+                )
                 
-                manter_login = st.checkbox("Manter conectado", key="manter_login")
+                password = st.text_input(
+                    "Senha",
+                    type="password",
+                    key="login_password",
+                    placeholder="Digite sua senha"
+                )
+                
+                # Espaçador para garantir alinhamento
+                st.markdown('<div style="height: 8px"></div>', unsafe_allow_html=True)
+                
+                manter_login = st.checkbox(
+                    "Manter conectado",
+                    key="manter_login",
+                    help="Mantenha-se conectado neste dispositivo"
+                )
                 
                 if st.form_submit_button("Entrar", use_container_width=True):
-                    with get_db() as db:
-                        user = auth_user(db, username, password)
-                        if user:
-                            st.session_state.authenticated = True
-                            st.session_state.user = user
-                            if manter_login:
-                                st.session_state.saved_user = user
+                    if not username.strip() or not password:
+                        st.error("Preencha usuário e senha.")
+                    else:
+                        with get_db() as db:
+                            user = auth_user(db, username.strip(), password)
+                            if user:
+                                st.session_state.authenticated = True
+                                st.session_state.user = user
+                                if manter_login:
+                                    st.session_state.saved_user = user
+                                
+                                # Executar alocação automática após login
+                                ensure_daily_allocation(db, user)
+                                st.rerun()
+                            else:
+                                st.error("Usuário ou senha inválidos.")
                             st.rerun()
                         else:
                             st.error("Usuário ou senha inválidos")
@@ -651,7 +1284,7 @@ def main():
                     if not new_username:
                         st.error("Preencha o nome de usuário")
                     else:
-                        with get_db() as db:
+                        with get_db_session() as db:
                             existing_user = db.execute(
                                 select(User).where(User.name == new_username)
                             ).scalar_one_or_none()
@@ -681,7 +1314,13 @@ def main():
                 logout()
                 
         with st.sidebar:
-            st.markdown('<h1 style="color: #1E40AF; font-size: 1.5rem; margin-bottom: 1rem;">☰ Menu</h1>', unsafe_allow_html=True)
+            # Menu Header
+            col1, col2 = st.columns([3,1])
+            with col1:
+                st.markdown('<h1 style="color: #1E40AF; font-size: 1.5rem; margin-bottom: 1rem;">☰ Menu</h1>', unsafe_allow_html=True)
+            with col2:
+                if st.button("Sair", key="btn_logout", type="primary"):
+                    logout()
             st.divider()
             
             menu_options = {
@@ -729,6 +1368,14 @@ def main():
                     st.rerun()
             
             menu = st.session_state.menu
+        
+        # Barra de navegação mobile no rodapé
+        bottom_nav([
+            {"icon": "📊", "label": "Dashboard"},
+            {"icon": "🎯", "label": "Plano"},
+            {"icon": "🪣", "label": "Baldes"},
+            {"icon": "💰", "label": "Entradas"}
+        ])
         
         # Dashboard
         if menu == "Dashboard":
@@ -822,176 +1469,597 @@ def main():
                 st.pyplot(fig2)
                 
                 st.subheader("📝 Movimentações Recentes")
-                st.dataframe(df.tail(10).sort_values("data", ascending=False))
+                safe_dataframe(df.tail(10).sort_values("data", ascending=False))
         
-        # Plano de Ataque
         elif menu == "Plano de Ataque":
-            st.header("🎯 Plano de Ataque")
+            # Usar a nova versão otimizada do Plano de Ataque
+            render_plano_ataque(db, giants)
             
+            # Mobile-optimized styles
+            st.markdown("""
+                <style>
+                    .stDataFrame {
+                        font-size: 0.875rem !important;
+                    }
+                    @media (max-width: 640px) {
+                        .stDataFrame {
+                            font-size: 0.75rem !important;
+                        }
+                        div[data-testid="column"] {
+                            width: 100% !important;
+                            flex: 1 1 100% !important;
+                            margin-bottom: 0.5rem !important;
+                        }
+                    }
+                    div[data-testid="stForm"] {
+                        background: white;
+                        padding: 1rem;
+                        border-radius: 0.5rem;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                        margin: 0.5rem 0;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+
             # Lista de Giants existentes
             if giants:
                 st.subheader("Gigantes Ativos")
                 
-                # Preparar dados para a tabela
-                giant_data = []
-                for giant in giants:
-                    total_pago = sum(p.amount for p in db.query(GiantPayment).filter_by(giant_id=giant.id).all())
-                    restante = giant.total_to_pay - total_pago
-                    progresso = (total_pago / giant.total_to_pay) if giant.total_to_pay > 0 else 0
-                    
+                # Previsões
+                st.caption("⏱️ Previsões")
+                for g in giants:
+                    restante, diaria, dias = giant_forecast(g, db)
+                    txt = f"• **{g.name}** — Restante: {money_br(restante)} | Meta diária: {money_br(diaria)}"
+                    txt += f" | ~ **{math.ceil(dias)}** dias" if dias else " | defina a Meta semanal"
+                    st.markdown(txt)
+                
+                # Usar expander para mostrar/esconder instruções em mobile
+                with st.expander("ℹ️ Como usar"):
+                    st.markdown("""
+                        - Toque nos botões ✏️ para editar
+                        - Toque em 🗑️ para excluir
+                        - Deslize para ver mais informações
+                        - Toque em um gigante para ver detalhes
+                    """)
+
+                # Recalcula dados para tabela
+                rows = []
+                for g in giants:
+                    total_pago = sum(p.amount for p in db.query(GiantPayment).filter_by(giant_id=g.id).all())
+                    restante = max(0.0, (g.total_to_pay or 0.0) - total_pago)
+                    progresso = (total_pago / g.total_to_pay) if (g.total_to_pay or 0) > 0 else 0.0
+
                     ultima_semana = date.today() - timedelta(days=7)
-                    aportes = db.query(GiantPayment).filter_by(giant_id=giant.id).all()
-                    depositos_semana = sum(p.amount for p in aportes if p.date >= ultima_semana)
-                    meta_atingida = depositos_semana >= giant.weekly_goal if giant.weekly_goal else False
-                    
-                    giant_data.append({
-                        "ID": giant.id,
-                        "Nome": giant.name,
-                        "Total": giant.total_to_pay,
+                    aportes = db.query(GiantPayment).filter_by(giant_id=g.id).all()
+                    depositos_semana = sum(p.amount for p in aportes if p.date and p.date >= ultima_semana)
+                    meta_txt = "-" if not g.weekly_goal else f"{money_br(depositos_semana)} / {money_br(g.weekly_goal)}"
+
+                    rows.append({
+                        "ID": g.id,
+                        "Nome": g.name,
+                        "Total": g.total_to_pay or 0.0,
                         "Pago": total_pago,
                         "Restante": restante,
-                        "Progresso": progresso,
-                        "Meta Semanal": f"{money_br(depositos_semana)} / {money_br(giant.weekly_goal)}" if giant.weekly_goal else "-",
+                        "Progresso": progresso,  # 0..1
+                        "Meta Semanal": meta_txt,
                         "Status": "✅" if progresso >= 0.95 else "⏳",
-                        "Taxa": f"{giant.interest_rate:.1f}%" if giant.interest_rate else "-"
+                        "Taxa": f"{(g.interest_rate or 0):.1f}%" if g.interest_rate else "-"
                     })
+
+                # ------- Formatação e exibição dos gigantes -------
+                df_giants = pd.DataFrame(rows)
+                # Formatar valores monetários antes
+                for colm in ["Total", "Pago", "Restante"]:
+                    df_giants[colm] = df_giants[colm].apply(money_br)
                 
-                # Criar DataFrame e formatar valores monetários antes
-                df_giants = pd.DataFrame(giant_data)
-                df_giants["Total"] = df_giants["Total"].apply(money_br)
-                df_giants["Pago"] = df_giants["Pago"].apply(money_br)
-                df_giants["Restante"] = df_giants["Restante"].apply(money_br)
-                
-                # Configurar colunas da tabela
+                # Exibir com configuração otimizada
                 st.dataframe(
                     df_giants,
                     column_config={
-                        "ID": "ID",
-                        "Nome": "Nome",
-                        "Total": "Total",
-                        "Pago": "Pago",
-                        "Restante": "Restante",
-                        "Progresso": st.column_config.ProgressColumn(
-                            "Progresso",
-                            help="Progresso do pagamento",
-                            format="%.0f%%",
-                            min_value=0,
-                            max_value=1
-                        ),
-                        "Meta Semanal": "Meta Semanal",
-                        "Status": "Status",
-                        "Taxa": "Taxa Mensal"
+                        "ID": st.column_config.NumberColumn("ID"),
+                        "Nome": st.column_config.TextColumn("Nome"),
+                        "Total": st.column_config.TextColumn("Total"),
+                        "Pago": st.column_config.TextColumn("Pago"),
+                        "Restante": st.column_config.TextColumn("Restante"),
+                        "Progresso": st.column_config.ProgressColumn("Progresso", min_value=0.0, max_value=1.0, format="%.0f%%"),
+                        "Meta Semanal": st.column_config.TextColumn("Meta Semanal"),
+                        "Status": st.column_config.TextColumn("Status"),
+                        "Taxa": st.column_config.TextColumn("Taxa Mensal"),
                     },
                     hide_index=True,
-                    use_container_width=True
+                    use_container_width=True,
                 )
                 
-                # Botão de excluir
-                selected_giant = st.selectbox("Selecione um gigante para excluir:", options=df_giants["Nome"].tolist(), key="select_giant_delete")
-                if selected_giant:
-                    giant_id = df_giants[df_giants["Nome"] == selected_giant]["ID"].iloc[0]
-                    if st.button("🗑️ Excluir Gigante", key=f"del_giant_{giant_id}", type="secondary"):
-                        st.session_state.confirmar_exclusao[giant_id] = True
-                    
-                    if st.session_state.confirmar_exclusao.get(giant.id):
-                        col_confirm1, col_confirm2 = st.columns(2)
-                        with col_confirm1:
-                            if st.button("✅ Confirmar", key=f"confirm_yes_{giant.id}"):
-                                try:
-                                    # Primeiro excluir os pagamentos
-                                    db.query(GiantPayment).filter_by(giant_id=giant.id).delete()
-                                    # Depois excluir o gigante
-                                    db.delete(giant)
-                                    db.commit()
-                                    st.success("Gigante excluído com sucesso!")
-                                    # Limpar o estado de confirmação
-                                    del st.session_state.confirmar_exclusao[giant.id]
-                                    time.sleep(0.5)  # Pequena pausa para garantir que a UI atualize
+                # Ações rápidas
+                st.caption("Ações rápidas")
+                for g in rows:
+                    c1, c2, c3 = st.columns([5,2,2])
+                    with c1:
+                        st.write(f"**{g['Nome']}** — Restante: {g['Restante']}")
+                    with c2:
+                        if st.button("✏️ Editar", key=f"e{g['ID']}"):
+                            st.session_state[f"edit_g_{g['ID']}"]=True
+                    with c3:
+                        if st.button("🗑️ Excluir", key=f"d{g['ID']}"):
+                            with get_db() as new_db:  # Nova conexão para exclusão
+                                if delete_giant(new_db, user.id, g['ID']):
+                                    st.cache_data.clear()  # Limpa cache após exclusão
+                                    time.sleep(0.5)  # Pequena pausa para feedback visual
                                     st.rerun()
+                    
+                    if st.session_state.get(f"edit_g_{g['ID']}"):
+                        with st.form(f"form_g_{g['ID']}"):
+                            nome = st.text_input("Nome", g['Nome'])
+                            total = st.number_input("Total a quitar", value=float(g['Total']), step=100.0)
+                            meta = st.number_input("Meta semanal", value=float(g['Meta Semanal'] or 0.0), step=50.0)
+                            taxa = st.number_input("Juros (%)", value=float(g['Taxa'] or 0.0), step=0.1, format="%.2f")
+                            if st.form_submit_button("Salvar"):
+                                with tx(db):
+                                    giant = db.get(Giant, g['ID'])
+                                    if giant:
+                                        giant.name = nome
+                                        giant.total_to_pay = total
+                                        giant.weekly_goal = meta
+                                        giant.interest_rate = taxa
+                                st.toast("Atualizado.")
+                                st.session_state[f"edit_g_{g['ID']}"]=False
+                                st.rerun()
+
+                # Add delete column
+                df_show["Excluir"] = False
+
+                edited = st.data_editor(
+                    df_show,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    hide_index=True,
+                    key="giants_editor",
+                )
+
+                # Previsões
+                st.subheader("⏱️ Previsões")
+                for g in rows:
+                    restante, diaria, dias = giant_forecast(Giant(**g), db)
+                    txt = f"• **{g['Nome']}** — Restante: {money_br(restante)} | Meta diária: {money_br(diaria)}"
+                    txt += f" | ~ **{math.ceil(dias)}** dias" if dias else " | defina a Meta semanal"
+                    st.markdown(txt)
+
+                # Process marked deletions
+                ids_para_excluir = edited.loc[edited["Excluir"] == True, "ID"].tolist() if edited is not None else []
+                if ids_para_excluir:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        confirm = st.button(f"🗑️ Excluir selecionado(s) ({len(ids_para_excluir)})", type="secondary", use_container_width=True)
+                    with col2:
+                        cancel = st.button("❌ Cancelar", use_container_width=True)
+                    
+                    if confirm and not cancel:
+                        with st.spinner("Excluindo registros..."):
+                            ok, fail = 0, 0
+                            for gid in ids_para_excluir:
+                                try:
+                                    with get_db() as db:  # Nova conexão para cada operação
+                                        if delete_giant(db, int(gid)):
+                                            ok += 1
+                                        else:
+                                            fail += 1
+                                except Exception as e:
+                                    st.error(f"Erro ao excluir ID {gid}: {str(e)}")
+                                    fail += 1
+                            
+                            if ok > 0:
+                                st.success(f"{ok} gigante(s) excluído(s) com sucesso!")
+                            if fail > 0:
+                                st.warning(f"{fail} registro(s) não puderam ser excluídos.")
+                            
+                            st.cache_data.clear()
+                            time.sleep(1)  # Pequena pausa para feedback visual
+                            st.rerun()
+
+                # Container para o cartão do gigante
+                with st.container():
+                    # Cabeçalho do cartão
+                    st.markdown("""
+                        <style>
+                            .giant-card {
+                                border: 1px solid #e5e7eb;
+                                border-radius: 0.5rem;
+                                padding: 1rem;
+                                margin-bottom: 1rem;
+                            }
+                            .giant-header {
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 0.75rem;
+                            }
+                            .giant-title {
+                                font-size: 1.125rem;
+                                color: #111827;
+                                margin: 0;
+                            }
+                            .giant-actions {
+                                display: flex;
+                                gap: 0.5rem;
+                            }
+                            .giant-button {
+                                padding: 0.25rem 0.5rem;
+                                border: none;
+                                background: none;
+                                cursor: pointer;
+                                border-radius: 0.25rem;
+                            }
+                            .giant-button:hover {
+                                background: #f3f4f6;
+                            }
+                        </style>
+                    """, unsafe_allow_html=True)
+                    
+                    # Layout do cartão
+                    col1, col2, col3 = st.columns([6,1,1])
+                    with col1:
+                        st.markdown(f"<h3 class='giant-title'>{giant['Nome']} {giant['Status']}</h3>", unsafe_allow_html=True)
+                    with col2:
+                        if st.button("✏️", key=f"edit_{giant['ID']}", help="Editar gigante", 
+                                   use_container_width=True, type="secondary"):
+                            st.session_state.editing_giant = giant['ID']
+                            st.rerun()
+                    with col3:
+                        # Botão de exclusão com confirmação
+                        if st.button("🗑️", key=f"del_{giant['ID']}", help="Excluir gigante",
+                                   use_container_width=True, type="secondary"):
+                            if "confirming_delete" not in st.session_state:
+                                st.session_state.confirming_delete = giant['ID']
+                                st.warning(f"Tem certeza que deseja excluir o gigante {giant['Nome']}?")
+                                st.button("Sim, excluir", key=f"confirm_del_{giant['ID']}", type="secondary")
+                            elif st.session_state.confirming_delete == giant['ID']:
+                                try:
+                                    db = get_db()
+                                    # Garante que temos os parâmetros corretos
+                                    user_id = st.session_state.user
+                                    if not user_id:
+                                        st.error("Usuário não encontrado")
+                                        return
+                                        
+                                    result = delete_giant(db, giant['ID'], user_id)
+                                    if result:
+                                        st.success(f"Gigante {giant['Nome']} excluído com sucesso!")
+                                        st.cache_data.clear()
+                                        time.sleep(0.5)  # Feedback visual
+                                        del st.session_state.confirming_delete
+                                        st.rerun()
+                                    else:
+                                        st.error("Não foi possível excluir o gigante")
                                 except Exception as e:
                                     st.error(f"Erro ao excluir: {str(e)}")
-                                    db.rollback()
-                        with col_confirm2:
-                            if st.button("❌ Cancelar", key=f"confirm_no_{giant.id}"):
-                                del st.session_state.confirmar_exclusao[giant.id]
-                                st.rerun()
-                    
-                    # Form para aporte
-                    with st.form(f"aporte_giant_{giant.id}"):
-                        ap_col1, ap_col2, ap_col3 = st.columns([2,2,1])
-                        with ap_col1:
-                            valor_aporte = st.number_input("Valor", min_value=0.0, step=100.0)
-                        with ap_col2:
-                            obs_aporte = st.text_input("Observação")
-                        with ap_col3:
-                            data_aporte = st.date_input("Data", value=date.today())
+                                finally:
+                                    if "confirming_delete" in st.session_state:
+                                        del st.session_state.confirming_delete
+                                <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:0.75rem;'>
+                                    <div>
+                                        <div style='color:#6B7280;font-size:0.75rem;'>Total</div>
+                                        <div style='color:#111827;font-weight:500;'>{giant['Total']}</div>
+                                    </div>
+                                    <div>
+                                        <div style='color:#6B7280;font-size:0.75rem;'>Pago</div>
+                                        <div style='color:#059669;font-weight:500;'>{giant['Pago']}</div>
+                                    </div>
+                                    <div>
+                                        <div style='color:#6B7280;font-size:0.75rem;'>Resta</div>
+                                        <div style='color:#DC2626;font-weight:500;'>{giant['Restante']}</div>
+                                    </div>
+                                </div>
+                                <div style='width:100%;background:#f3f4f6;height:0.5rem;border-radius:0.25rem;overflow:hidden;'>
+                                    <div style='
+                                        background:linear-gradient(90deg, #059669, #10B981);
+                                        width:{giant['Progresso']*100}%;
+                                        height:100%;
+                                        border-radius:0.25rem;
+                                        transition:width 0.3s ease;
+                                    '></div>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
                         
-                        if st.form_submit_button("💰 Registrar Aporte"):
-                            if valor_aporte > 0:
-                                aporte = GiantPayment(
-                                    user_id=user.id,
-                                    giant_id=giant.id,
-                                    amount=valor_aporte,
-                                    date=data_aporte,
-                                    note=obs_aporte
-                                )
-                                db.add(aporte)
-                                if total_pago + valor_aporte >= giant.total_to_pay:
-                                    giant.status = "defeated"
-                                    st.balloons()
-                                db.commit()
-                                st.success("Aporte registrado!")
-                                st.rerun()
-                            else:
-                                st.error("Informe um valor maior que zero")
-                    
-                    # Histórico resumido
-                    aportes = db.query(GiantPayment).filter_by(giant_id=giant.id).order_by(GiantPayment.date.desc()).limit(3).all()
-                    if aportes:
-                        st.caption("Últimos aportes:")
-                        for aporte in aportes:
-                            st.text(f"- {date_br(aporte.date)}: {money_br(aporte.amount)}")
-                    
-                    st.divider()
+                        # Handle edit/delete actions via session state
+                        if f"edit_{giant['ID']}" not in st.session_state:
+                            st.session_state[f"edit_{giant['ID']}"] = False
+                            
+                        if st.session_state.get(f"edit_{giant['ID']}", False):
+                            with st.form(f"edit_giant_{giant['ID']}", clear_on_submit=True):
+                                st.markdown("<h4 style='margin:0;'>Editar Gigante</h4>", unsafe_allow_html=True)
+                                c1, c2 = st.columns(2)
+                                with c1:
+                                    new_total = st.number_input("Novo Total", value=float(giant['Total'].replace('R$','').replace('.','').replace(',','.').strip()), step=100.0)
+                                with c2:
+                                    new_goal = st.number_input("Meta Semanal", value=0.0, step=50.0)
+                                
+                                if st.form_submit_button("💾 Salvar", use_container_width=True):
+                                    def update_giant(session, giant_id, total, goal):
+                                        giant = session.query(Giant).get(giant_id)
+                                        if giant:
+                                            giant.total_to_pay = total
+                                            giant.weekly_goal = goal
+                                            return True
+                                        return False
+                                    
+                                    if safe_operation(update_giant, giant['ID'], new_total, new_goal):
+                                        st.success("Gigante atualizado!")
+                                        st.session_state[f"edit_{giant['ID']}"] = False
+                                        st.rerun()
+                                        
+                        if st.session_state.confirmar_exclusao.get(giant['ID']):
+                            st.warning("Confirma a exclusão deste Gigante?")
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                if st.button("✅ Sim", key=f"confirm_del_{giant['ID']}", use_container_width=True):
+                                    def delete_giant(db, giant_id: int):
+                                        try:
+                                            g = db.get(Giant, giant_id)
+                                            if not g:
+                                                st.error("Gigante não encontrado.")
+                                                return False
+                                            # Delete giant's payments quickly
+                                            db.query(GiantPayment).filter(GiantPayment.giant_id == g.id).delete(synchronize_session=False)
+                                            db.delete(g)
+                                            db.commit()
+                                            st.cache_data.clear()
+                                            return True
+                                        except Exception as e:
+                                            db.rollback()
+                                            st.error(f"Erro ao excluir: {str(e)}")
+                                            return False
+
+                                    with get_db() as db:
+                                        if delete_giant(db, giant['ID']):
+                                            st.success("Gigante excluído!")
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        else:
+                                            st.error("Gigante não encontrado ou já removido.")
+                            with c2:
+                                if st.button("❌ Não", key=f"cancel_del_{giant['ID']}", use_container_width=True):
+                                    st.session_state.confirmar_exclusao.pop(giant['ID'])
+                                    st.rerun()
+                        
+                        if st.session_state.get("editing") == giant['ID']:
+                            with st.form(f"edit_giant_{giant['ID']}"):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    new_total = st.number_input("Novo Total", value=float(giant['Total'].replace('R$','').replace('.','').replace(',','.').strip()))
+                                    new_goal = st.number_input("Nova Meta Semanal", value=0.0, step=100.0)
+                                with col2:
+                                    new_rate = st.number_input("Nova Taxa (%)", value=float(giant['Taxa'].replace('%','').strip()) if giant['Taxa'] != '-' else 0.0)
+                                
+                                if st.form_submit_button("💾 Salvar"):
+                                    with get_db() as db:
+                                        g = db.query(Giant).get(giant['ID'])
+                                        if g:
+                                            g.total_to_pay = new_total
+                                            g.weekly_goal = new_goal
+                                            g.interest_rate = new_rate
+                                        st.session_state.editing = None
+                                        st.rerun()
+                
+                        if st.session_state.confirmar_exclusao.get(giant['ID']):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("✅ Confirmar", key=f"confirm_{giant['ID']}"):
+                                    with get_db_session() as db:
+                                        g = db.query(Giant).get(giant['ID'])
+                                        if g:
+                                            db.delete(g)
+                                        st.session_state.confirmar_exclusao.pop(giant['ID'])
+                                        st.rerun()
+                            with col2:
+                                if st.button("❌ Cancelar", key=f"cancel_{giant['ID']}"):
+                                    st.session_state.confirmar_exclusao.pop(giant['ID'])
+                                    st.rerun()
+
+                # Seleção / Ações sobre um giant específico
+                nomes = df_giants["Nome"].tolist()
+                selected_name = st.selectbox("Selecione um Gigante:", options=nomes, key="giant_select")
+                if selected_name:
+                    sel_id = int(pd.DataFrame(rows).query("Nome == @selected_name")["ID"].iloc[0])
+                    giant_sel = db.query(Giant).get(sel_id)
+                    if not giant_sel:
+                        st.error("Gigante não encontrado.")
+                    else:
+                        # Ações: Excluir (com confirmação)
+                        cols_actions = st.columns([1, 1, 6])
+                        with cols_actions[0]:
+                            if st.button("🗑️ Excluir", key=f"del_giant_btn_{sel_id}", type="secondary"):
+                                st.session_state.confirmar_exclusao[sel_id] = True
+                        with cols_actions[1]:
+                            st.write("")  # espaçador
+
+                        if st.session_state.confirmar_exclusao.get(sel_id):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                if st.button("✅ Confirmar", key=f"confirm_giant_yes_{sel_id}"):
+                                    try:
+                                        db.query(GiantPayment).filter_by(giant_id=sel_id).delete()
+                                        db.delete(giant_sel)
+                                        db.commit()
+                                        st.success("Gigante excluído com sucesso!")
+                                        st.session_state.confirmar_exclusao.pop(sel_id, None)
+                                        st.rerun()
+                                    except Exception as e:
+                                        db.rollback()
+                                        st.error(f"Erro ao excluir: {e}")
+                            with c2:
+                                if st.button("❌ Cancelar", key=f"confirm_giant_no_{sel_id}"):
+                                    st.session_state.confirmar_exclusao.pop(sel_id, None)
+                                    st.rerun()
+
+                        # Form de aporte
+                        with st.form(f"aporte_giant_{sel_id}"):
+                            ap_col1, ap_col2, ap_col3 = st.columns([2, 2, 1])
+                            with ap_col1:
+                                valor_aporte = st.number_input("Valor", min_value=0.0, step=100.0, format="%.2f")
+                            with ap_col2:
+                                obs_aporte = st.text_input("Observação", value="")
+                            with ap_col3:
+                                data_aporte = st.date_input("Data", value=date.today())
+
+                            if st.form_submit_button("💰 Registrar Aporte"):
+                                if valor_aporte <= 0:
+                                    st.error("Informe um valor maior que zero.")
+                                    return
+
+                                try:
+                                    with get_db() as new_db:  # Nova conexão
+                                        novo = GiantPayment(
+                                            user_id=user.id, 
+                                            giant_id=sel_id,
+                                            amount=valor_aporte, 
+                                            date=data_aporte,
+                                            note=obs_aporte or f"Aporte {data_aporte.strftime('%d/%m/%Y')}"
+                                        )
+                                        new_db.add(novo)
+                                        giant_sel = new_db.get(Giant, sel_id)  # Recarrega o gigante
+                                        if giant_sel:
+                                            check_giant_victory(new_db, giant_sel, valor_aporte)
+                                            new_db.commit()
+                                            st.cache_data.clear()
+                                            st.success("✅ Aporte registrado!")
+                                            st.toast(f"💰 {money_br(valor_aporte)} aportado", icon="💪")
+                                            time.sleep(0.5)
+                                            st.rerun()
+                                except Exception as e:
+                                    db.rollback()
+                                    st.error(f"Erro ao registrar aporte: {str(e)}")
+                                    st.rerun()
+                                else:
+                                    st.error("Informe um valor maior que zero.")
+
+                        # Histórico resumido
+                        ult = db.query(GiantPayment).filter_by(giant_id=sel_id).order_by(GiantPayment.date.desc()).limit(3).all()
+                        if ult:
+                            st.caption("Últimos aportes:")
+                            for ap in ult:
+                                st.text(f"- {date_br(ap.date)}: {money_br(ap.amount)}")
+
+                st.divider()
+
+            # Novo Giant with mobile optimizations
+            st.markdown("""
+                <h3 style='
+                    font-size: 1.25rem;
+                    color: #111827;
+                    margin: 1.5rem 0 1rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                '>
+                    <span style='font-size:1.5rem;'>➕</span> Novo Gigante
+                </h3>
+            """, unsafe_allow_html=True)
             
-            st.markdown("### ➕ Novo Gigante")
-            # Form para criar novo Giant
-            with st.form("novo_giant"):
+            with st.form("novo_giant", clear_on_submit=True):
+                st.markdown("""
+                    <style>
+                        div[data-testid="stForm"] {
+                            background: white;
+                            padding: 1.5rem;
+                            border-radius: 0.75rem;
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                            border: 1px solid #e5e7eb;
+                        }
+                        @media (max-width: 640px) {
+                            div[data-testid="stForm"] {
+                                padding: 1rem;
+                            }
+                            div[data-testid="column"] {
+                                width: 100% !important;
+                            }
+                        }
+                    </style>
+                """, unsafe_allow_html=True)
+                
+                # Split form into sections for better mobile layout
+                st.markdown("##### Informações Básicas")
+                nome_giant = st.text_input(
+                    "Nome do Gigante",
+                    placeholder="Ex: Cartão Nubank",
+                    help="Digite o nome identificador do Gigante"
+                )
+                
                 col1, col2 = st.columns(2)
                 with col1:
-                    nome_giant = st.text_input("Nome do Gigante", placeholder="Ex: Cartão Nubank")
-                    valor_total = st.number_input("Valor Total a Quitar", min_value=0.0, step=100.0)
-                    deposito_semanal = st.number_input("Meta de Depósito Semanal", min_value=0.0, step=50.0)
+                    valor_total = st.number_input(
+                        "Valor Total a Quitar",
+                        min_value=0.0,
+                        step=100.0,
+                        format="%.2f",
+                        help="Valor total da dívida"
+                    )
                 with col2:
-                    parcelas = st.number_input("Número de Parcelas", min_value=0, step=1)
-                    prioridade = st.number_input("Prioridade (1 = maior)", min_value=1, step=1)
-                    taxa_juros = st.number_input("Taxa de Juros Mensal (%)", min_value=0.0, step=0.1, format="%.2f")
+                    parcelas = st.number_input(
+                        "Número de Parcelas",
+                        min_value=0,
+                        step=1,
+                        help="Quantidade de parcelas (0 para valor único)"
+                    )
                 
-                if st.form_submit_button("Criar Gigante"):
+                st.markdown("##### Metas e Prioridades")
+                col3, col4 = st.columns(2)
+                with col3:
+                    deposito_semanal = st.number_input(
+                        "Meta de Depósito Semanal",
+                        min_value=0.0,
+                        step=50.0,
+                        format="%.2f",
+                        help="Quanto você planeja depositar por semana"
+                    )
+                with col4:
+                    prioridade = st.number_input(
+                        "Prioridade",
+                        min_value=1,
+                        step=1,
+                        help="1 = maior prioridade"
+                    )
+                
+                taxa_juros = st.number_input(
+                    "Taxa de Juros Mensal (%)",
+                    min_value=0.0,
+                    step=0.1,
+                    format="%.2f",
+                    help="Taxa de juros mensal em porcentagem"
+                )
+
+                if st.form_submit_button("💾 Criar Gigante", use_container_width=True):
                     if nome_giant and valor_total > 0:
-                        # Calcular Payoff Efficiency (R$/1k)
-                        montante_final = valor_total * (1 + taxa_juros/100) ** parcelas
-                        payoff_efficiency = (montante_final - valor_total) / (valor_total/1000)
-                        
-                        giant = Giant(
-                            user_id=user.id,
-                            name=nome_giant,
-                            total_to_pay=valor_total,
-                            parcels=parcelas,
-                            priority=prioridade,
-                            status="active",
-                            weekly_goal=deposito_semanal,
-                            interest_rate=taxa_juros,
-                            payoff_efficiency=payoff_efficiency
-                        )
-                        db.add(giant)
-                        db.commit()
-                        st.success("Gigante criado com sucesso!")
-                        st.rerun()
+                        # Calculate values
+                        montante_final = valor_total * (1 + (taxa_juros / 100.0)) ** parcelas if parcelas > 0 else valor_total
+                        payoff_eff = 0.0 if valor_total == 0 else (montante_final - valor_total) / (valor_total / 1000.0)
+
+                        # Create new Giant with safe operation
+                        def create_giant(session):
+                            novo_g = Giant(
+                                user_id=user.id,
+                                name=nome_giant,
+                                total_to_pay=valor_total,
+                                parcels=int(parcelas),
+                                priority=int(prioridade),
+                                status="active",
+                                weekly_goal=deposito_semanal,
+                                interest_rate=taxa_juros,
+                                payoff_efficiency=payoff_eff
+                            )
+                            session.add(novo_g)
+                            return True
+
+                        if safe_operation(create_giant):
+                            st.success(f"✅ Gigante {nome} foi criado!")
+                            st.toast("Novo desafio registrado!", icon="🎯")
+                            st.balloons()
+                            time.sleep(0.5)  # Pequena pausa para efeito visual
+                            st.rerun()
+                        else:
+                            st.error("❌ Erro ao criar o Gigante")
                     else:
-                        st.error("Preencha o nome e valor do Giant")
-            
-            st.divider()
+                        st.error("⚠️ Preencha o nome e valor do Gigante")
         
         # Baldes
         elif menu == "Baldes":
@@ -1032,31 +2100,39 @@ def main():
                 
                 # Mostrar baldes com opção de exclusão
                 for bucket in buckets:
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.metric(
-                            f"{bucket.name} ({bucket.percent}%)", 
-                            money_br(bucket.balance),
-                            help=f"Prioridade: {bucket.description}"
-                        )
-                    with col2:
-                        if st.button("⨯", key=f"del_bucket_{bucket.id}", type="secondary", help="Excluir"):
-                            st.session_state.confirmar_exclusao_balde[bucket.id] = True
-                        
-                        if st.session_state.confirmar_exclusao_balde.get(bucket.id):
-                            st.warning("Tem certeza que deseja excluir este Balde?")
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                if st.button("✅ Sim", key=f"confirm_bucket_yes_{bucket.id}"):
-                                    db.delete(bucket)
-                                    db.commit()
-                                    st.success("Balde excluído com sucesso!")
-                                    st.session_state.confirmar_exclusao_balde[bucket.id] = False
-                                    st.rerun()
-                            with col_b:
-                                if st.button("❌ Não", key=f"confirm_bucket_no_{bucket.id}"):
-                                    st.session_state.confirmar_exclusao_balde[bucket.id] = False
-                                    st.rerun()
+                    # Transform bucket data into a DataFrame for data_editor
+                    df_buckets = pd.DataFrame([{
+                        "ID": bucket.id,
+                        "Nome": bucket.name,
+                        "Porcentagem": f"{bucket.percent}%",
+                        "Saldo": money_br(bucket.balance),
+                        "Prioridade": bucket.description,
+                        "Excluir": False
+                    }])
+                    
+                    edited = st.data_editor(
+                        df_buckets,
+                        use_container_width=True,
+                        num_rows="fixed",
+                        hide_index=True,
+                        key=f"bucket_editor_{bucket.id}",
+                    )
+                    
+                    # Process deletions
+                    ids_para_excluir = edited.loc[edited["Excluir"] == True, "ID"].tolist()
+                    if ids_para_excluir:
+                        if st.button(f"🗑️ Excluir balde", type="secondary", key=f"del_bucket_{bucket.id}"):
+                            try:
+                                # Delete with synchronize_session=False for better performance
+                                db.query(Movement).filter(Movement.bucket_id == bucket.id).delete(synchronize_session=False)
+                                db.delete(bucket)
+                                db.commit()
+                                st.success("Balde excluído com sucesso!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                db.rollback()
+                                st.error("Erro ao excluir balde. Tente novamente.")
                     st.markdown("<hr style='margin: 0.5rem 0'>", unsafe_allow_html=True)
         
         # Entrada e Saída
@@ -1162,27 +2238,38 @@ def main():
                     ) if buckets else None
                 
                 if st.form_submit_button("Registrar"):
-                    if tipo == "Entrada":
-                        # Calcular distribuição pelos baldes
-                        total_percent = sum(b.percent for b in buckets)
-                        if total_percent > 0:
-                            for bucket in buckets:
-                                # Calcular valor proporcional para este balde
-                                perc_normalizado = (bucket.percent / total_percent) * 100
-                                valor_balde = (valor * perc_normalizado) / 100
-                                
-                                # Criar movimento para este balde
-                                mov = Movement(
-                                    user_id=user.id,
-                                    bucket_id=bucket.id,
+                    if not desc:
+                        st.error("Informe uma descrição.")
+                        return
+                        
+                    if valor <= 0:
+                        st.error("Informe um valor maior que zero.")
+                        return
+
+                    with get_db() as new_db:  # Nova conexão
+                        # Tenta distribuir o valor
+                        if distribuir_por_baldes(new_db, user.id, valor, desc, date.today(), tipo):
+                            st.success(f"✅ {tipo} de {money_br(valor)} distribuída entre baldes.")
+                            st.toast("Transação registrada!", icon="💰")
+                            st.cache_data.clear()  # Limpa cache para atualizar valores
+                            time.sleep(0.5)  # Pequena pausa para feedback
+                            st.rerun()
+                        st.error("Selecione um balde para a despesa.")
+                        return
+
+                    try:
+                        # Usar a função distribuir_by_buckets para ambos os casos
+                        distribute_by_buckets(
+                            db=db, user_id=user.id, buckets=buckets,
+                            valor=valor, tipo=tipo, data_mov=date.today(),
+                            desc=desc, auto=(tipo == "Entrada"),
+                            bucket_id=(bucket_id if tipo == "Despesa" else None)
+                        )
                                     kind="Receita",
                                     amount=valor_balde,
-                                    description=f"{desc} (Distribuição: {perc_normalizado:.1f}%)",
+                                    description=f"{desc} (Distribuição: {perc:.1f}%)",
                                     date=data_mov
-                                )
-                                db.add(mov)
-                                
-                                # Atualizar saldo do balde
+                                ))
                                 bucket.balance += valor_balde
                             
                             db.commit()
@@ -1298,46 +2385,98 @@ def main():
                 
                 st.divider()
                 
-                # Tabela de movimentações
+                def delete_movement(db, movement_id: int):
+                    """Delete a movement with proper error handling"""
+                    movement = db.get(Movement, movement_id)
+                    if not movement:
+                        return False
+                    
+                    # Update bucket balance before deleting
+                    bucket = db.get(Bucket, movement.bucket_id)
+                    if bucket:
+                        amount = movement.amount
+                        if movement.kind == "Despesa":
+                            amount = -amount
+                        bucket.balance -= amount
+                    
+                    db.delete(movement)
+                    db.commit()
+                    return True
+
+                # Mobile-friendly movements table with pagination
                 st.subheader("📝 Histórico de Movimentações")
-                df = pd.DataFrame([
+
+                # Pagination controls
+                items_per_page = 50
+                if 'movement_page' not in st.session_state:
+                    st.session_state.movement_page = 1
+
+                movements_page, total_movements = load_user_movements(
+                    user.id, 
+                    page=st.session_state.movement_page,
+                    per_page=items_per_page
+                )
+
+                df_movements = pd.DataFrame([
                     {
+                        "ID": m.id,
                         "Data": date_br(m.date),
                         "Descrição": m.description,
                         "Tipo": "➕ Receita" if m.kind == "Receita" else "➖ Despesa",
                         "Valor": money_br(m.amount if m.kind == "Receita" else -m.amount),
-                        "Balde": next((b.name for b in buckets if b.id == m.bucket_id), None),
-                        "ID": m.id
+                        "Balde": next((b.name for b in buckets if b.id == m.bucket_id), ""),
+                        "Excluir": False
                     }
-                    for m in movements
-                ]).sort_values("Data", ascending=False)
-                
-                # Criar tabela unificada e organizada
-                df_styled = df.copy()
-                df_styled["Ações"] = df_styled["ID"].apply(lambda x: "🗑️")
-                
-                # Reordenar e renomear colunas
-                df_styled = df_styled[["Data", "Descrição", "Tipo", "Valor", "Balde", "Ações"]]
-                
-                # Aplicar estilos condicionais
-                def highlight_row(row):
-                    color = "#10B98120" if "Receita" in row["Tipo"] else "#EF444420"
-                    return [f"background-color: {color}" for _ in range(len(row))]
-                
-                # Mostrar tabela estilizada
-                st.dataframe(
-                    df_styled,
-                    column_config={
-                        "Data": st.column_config.TextColumn(
-                            "Data",
-                            width="small",
-                        ),
-                        "Descrição": st.column_config.TextColumn(
-                            "Descrição",
-                            width="medium",
-                        ),
-                        "Tipo": st.column_config.TextColumn(
-                            "Tipo",
+                    for m in movements_page
+                ])
+
+                # Show data editor with delete option
+                edited = st.data_editor(
+                    df_movements,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    hide_index=True,
+                    disabled=["ID", "Data", "Descrição", "Tipo", "Valor", "Balde"],
+                    key=f"movements_editor_{st.session_state.movement_page}"
+                )
+
+                # Pagination controls
+                total_pages = (total_movements + items_per_page - 1) // items_per_page
+                if total_pages > 1:
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col1:
+                        if st.session_state.movement_page > 1:
+                            if st.button("⬅️ Anterior"):
+                                st.session_state.movement_page -= 1
+                                st.rerun()
+                    with col2:
+                        st.write(f"Página {st.session_state.movement_page} de {total_pages}")
+                    with col3:
+                        if st.session_state.movement_page < total_pages:
+                            if st.button("Próxima ➡️"):
+                                st.session_state.movement_page += 1
+                                st.rerun()
+
+                # Process deletions
+                ids_para_excluir = edited.loc[edited["Excluir"] == True, "ID"].tolist()
+                if ids_para_excluir:
+                    if st.button(f"🗑️ Excluir movimento(s) ({len(ids_para_excluir)})", type="secondary"):
+                        ok, fail = 0, 0
+                        for mid in ids_para_excluir:
+                            try:
+                                if delete_movement(db, int(mid)):
+                                    ok += 1
+                                else:
+                                    fail += 1
+                            except Exception:
+                                db.rollback()
+                                fail += 1
+                        if ok:
+                            st.success(f"{ok} movimento(s) excluído(s).")
+                        if fail:
+                            st.warning(f"{fail} não encontrado(s) ou já removido(s).")
+                        st.cache_data.clear()
+                        st.rerun()
                             width="small",
                         ),
                         "Valor": st.column_config.TextColumn(
@@ -1419,49 +2558,74 @@ def main():
                         importance_mark = "🔴" if conta.is_critical else "⚪"
                         st.warning(f"{importance_mark} {conta.title}: {money_br(conta.amount)}")
                 
-                # DataFrame de todas as contas
+                def delete_bill(db, bill_id: int):
+                    """Delete a bill with proper error handling"""
+                    bill = db.get(Bill, bill_id)
+                    if not bill:
+                        return False
+                    db.delete(bill)
+                    db.commit()
+                    return True
+
+                # DataFrame optimized for mobile
                 df_bills = pd.DataFrame([
                     {
-                        "Data": b.due_date,
-                        "Descrição": f"{'🔴' if b.is_critical else '⚪'} {b.title}",
-                        "Valor": b.amount,
-                        "Status": "✅ Pago" if b.paid else "❌ Pendente",
-                        "ID": b.id
+                        "ID": b.id,
+                        "Prioridade": "🔴" if b.is_critical else "⚪",
+                        "Descrição": b.title,
+                        "Valor": money_br(b.amount),
+                        "Data": date_br(b.due_date),
+                        "Pago": b.paid,
+                        "Excluir": False
                     }
                     for b in bills
                 ])
                 
-                # Exibir calendário
-                st.subheader("Próximos Vencimentos")
+                # Show compact data editor
+                st.subheader("📅 Próximos Vencimentos")
                 
-                # Adicionar opção de marcar como pago e excluir
-                for index, row in df_bills.iterrows():
-                    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 0.3, 0.3])
-                    with col1:
-                        st.write(f"{row['Descrição']}")
-                    with col2:
-                        st.write(money_br(row['Valor']))
-                    with col3:
-                        st.write(date_br(row['Data']))
-                    with col4:
-                        if row['Status'] == "❌ Pendente":
-                            if st.button("✅", key=f"pay_bill_{row['ID']}"):
-                                bill = db.query(Bill).get(row['ID'])
-                                if bill:
-                                    bill.paid = True
-                                    db.commit()
-                                    st.success("Conta marcada como paga!")
-                                    st.rerun()
-                        else:
-                            st.write("✓")
-                    with col5:
-                        if st.button("⨯", key=f"del_bill_{row['ID']}", type="secondary", help="Excluir"):
-                            bill = db.query(Bill).get(row['ID'])
-                            if bill:
-                                db.delete(bill)
-                                db.commit()
-                                st.success("Conta excluída!")
-                                st.rerun()
+                edited = st.data_editor(
+                    df_bills,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    hide_index=True,
+                    key="bills_editor",
+                    disabled=["ID", "Prioridade", "Descrição", "Valor", "Data"],
+                )
+
+                # Process payments
+                pagamentos = df_bills[~df_bills["Pago"]].index[edited["Pago"] & ~df_bills["Pago"]]
+                if not pagamentos.empty:
+                    for idx in pagamentos:
+                        bill_id = df_bills.iloc[idx]["ID"]
+                        bill = db.get(Bill, bill_id)
+                        if bill:
+                            bill.paid = True
+                            db.commit()
+                            st.success(f"✅ {bill.title} marcada como paga!")
+                            st.cache_data.clear()
+                            st.rerun()
+
+                # Process deletions
+                ids_para_excluir = edited.loc[edited["Excluir"] == True, "ID"].tolist()
+                if ids_para_excluir:
+                    if st.button(f"🗑️ Excluir selecionada(s) ({len(ids_para_excluir)})", type="secondary"):
+                        ok, fail = 0, 0
+                        for bid in ids_para_excluir:
+                            try:
+                                if delete_bill(db, int(bid)):
+                                    ok += 1
+                                else:
+                                    fail += 1
+                            except Exception:
+                                db.rollback()
+                                fail += 1
+                        if ok:
+                            st.success(f"{ok} conta(s) excluída(s).")
+                        if fail:
+                            st.warning(f"{fail} não encontrada(s) ou já removida(s).")
+                        st.cache_data.clear()
+                        st.rerun()
                 
                 # Sumário de valores
                 st.subheader("Total de Contas")
@@ -1493,7 +2657,7 @@ def main():
                 
                 if not df_atrasadas.empty:
                     st.subheader("Contas Atrasadas")
-                    st.dataframe(df_atrasadas)
+                    safe_dataframe(df_atrasadas)
                 else:
                     st.success("Nenhuma conta atrasada!")
                 
@@ -1511,7 +2675,7 @@ def main():
                 ])
                 
                 if not df_risco.empty:
-                    st.dataframe(df_risco)
+                    safe_dataframe(df_risco)
                 else:
                     st.success("Nenhum risco de atraso identificado!")
         

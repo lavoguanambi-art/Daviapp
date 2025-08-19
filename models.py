@@ -21,8 +21,9 @@ class UserProfile(Base):
     __table_args__ = {'extend_existing': True}
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
-    monthly_income  = Column(Float, default=0.0)
+    monthly_income = Column(Float, default=0.0)
     monthly_expense = Column(Float, default=0.0)
+    last_allocation_date = Column(Date, nullable=True)  # última data em que rodamos a divisão diária
 
     user = relationship("User", back_populates="profile")
 

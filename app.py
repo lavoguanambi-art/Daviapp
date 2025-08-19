@@ -7,7 +7,15 @@ from contextlib import contextmanager
 # --- Bibliotecas externas ---
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt as plt
+
+# ==== CONFIGURAÇÃO CSS ====
+def load_css():
+    """Carrega os estilos CSS do arquivo styles.css"""
+    css_path = Path("styles.css")
+    if css_path.exists():
+        with open(css_path, 'r', encoding='utf-8') as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 # ==== HELPER FUNCTIONS ====
 def format_currency(value, format_str="R$ {:.2f}"):
@@ -47,6 +55,7 @@ from services.giants import delete_giant
 from services.movements import create_income
 from services.buckets import split_income_by_buckets
 from ui import inject_mobile_ui, hamburger, bottom_nav
+from utils import load_css, money_br, date_br
 from models import (
     User, Bucket, Giant, Movement, Bill,
     UserProfile, GiantPayment

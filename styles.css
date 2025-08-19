@@ -1,7 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600&display=swap');
-
-/* Importar fonte Inter do Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
+
+/* Estilos base e responsivos */
+div.block-container {
+    max-width: 900px;
+    padding: 0.5rem 1rem;
+}
+
+@media (max-width: 480px) {
+    div.block-container {
+        padding: 0.25rem 0.5rem;
+    }
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input {
+        height: 44px;
+        font-size: 16px;
+    }
+    .stButton button {
+        height: 44px;
+    }
+}
 
 /* Variáveis globais */
 :root {

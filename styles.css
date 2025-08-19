@@ -1,116 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
-
-/* Estilos base e responsivos */
-div.block-container {
-    max-width: 900px;
-    padding: 0.5rem 1rem;
-}
-
-@media (max-width: 480px) {
-    div.block-container {
-        padding: 0.25rem 0.5rem;
-    }
-    .stTextInput input,
-    .stNumberInput input,
-    .stDateInput input {
-        height: 44px;
-        font-size: 16px;
-    }
-    .stButton button {
-        height: 44px;
-    }
-}
 
 /* Variáveis globais */
 :root {
-    --primary: #223765;
-    --success: #10B981;
-    --warning: #F59E0B;
-    --danger: #EF4444;
-    --text-dark: #111827;
-    --text-light: #6B7280;
-    --bg-light: #F1F5F9;
-    --white: #FFFFFF;
+  --primary: #223765;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --text-dark: #111827;
+  --text-light: #6B7280;
+  --bg-light: #F1F5F9;
+  --white: #FFFFFF;
 }
 
 /* Reset e estilos base */
 div.stButton > button {
-    background-color: var(--primary);
-    color: var(--white);
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 0.375rem;
-    transition: all 0.2s ease;
+  background-color: var(--primary);
+  color: var(--white);
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
 }
 
 div.stButton > button:hover {
-    transform: scale(1.02);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transform: scale(1.02);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
-/* Dataframes: horizontal scroll on mobile, fixed header */
-[data-testid="stDataFrame"] div[role="table"] { overflow-x: auto; }
-[data-testid="stDataFrame"] { font-size: 14px; }
-
-/* Harmonized sidebar + visual "hamburger" */
-section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] button { color: #1E40AF !important; }
-.stApp:before {
-    content: "☰";
-    position: fixed;
-    left: 14px;
-    top: 12px;
-    z-index: 999;
-    font-size: 22px;
-    color: #1E40AF;
-    opacity: .9;
+/* Dataframes */
+[data-testid="stDataFrame"] div[role="table"] {
+  overflow-x: auto;
 }
-
-/* Avoid overwriting native Safari icons */
-@supports (-webkit-touch-callout: none) {
-    .stApp:before { top: 10px; }
-}
-
-/* iOS/Safari dark mode: maintain contrast */
-@media (prefers-color-scheme: dark) {
-    body { background: #0b0f15 !important; }
-}
+[data-testid="stDataFrame"] {
+  font-size: 14px;
 }
 
 /* Sidebar */
-[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
-    width: 250px;
+section[data-testid="stSidebar"] {
+  width: min(86vw, 300px) !important;
 }
-[data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
-    width: 250px;
-    margin-left: -250px;
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] button {
+  color: #1E40AF !important;
 }
 
-/* Sidebar Menu Styling */
+.stApp:before {
+  content: "☰";
+  position: fixed;
+  left: 14px;
+  top: 12px;
+  z-index: 999;
+  font-size: 22px;
+  color: #1E40AF;
+  opacity: .9;
+}
+
+@supports (-webkit-touch-callout: none) {
+  .stApp:before { top: 10px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  body { background: #0b0f15 !important; }
+}
+
+/* Sidebar expandido/colapsado */
+[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
+  width: 250px;
+}
+
+[data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
+  width: 250px;
+  margin-left: -250px;
+}
+
+/* Navegação da sidebar */
 .stSidebar [data-testid="stSidebarNav"] {
-    padding: 1rem 0.5rem !important;
+  padding: 1rem 0.5rem !important;
 }
 
 .stSidebar [data-testid="stSidebarNav"] > div {
-    padding: 0.25rem !important;
+  padding: 0.25rem !important;
 }
 
 .stSidebar [data-testid="stSidebarNav"] button,
 .stSidebar [data-testid="stSidebarNav"] a {
-    color: #1E40AF !important;
-    font-weight: 500 !important;
-    font-size: 0.95rem !important;
-    padding: 0.5rem 0.75rem !important;
-    border-radius: 0.375rem;
-    transition: all 0.2s ease;
+  color: #1E40AF !important;
+  font-weight: 500 !important;
+  font-size: 0.95rem !important;
+  padding: 0.5rem 0.75rem !important;
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
 }
 
 .stSidebar [data-testid="stSidebarNav"] button:hover,
 .stSidebar [data-testid="stSidebarNav"] a:hover {
-    color: #223765 !important;
-    background-color: rgba(30, 64, 175, 0.08) !important;
-    transform: translateX(2px);
+  color: #223765 !important;
+  background-color: rgba(30, 64, 175, 0.08) !important;
+  transform: translateX(2px);
 }
 
 /* Sidebar Styling */
@@ -299,101 +286,97 @@ section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
     background-color: #f8f9fa !important;
 }
 
-/* Estilo para formulários */
+/* Formulários */
 form {
-    padding: 20px !important;
-    border: 2px solid #e1e4e8 !important;
-    border-radius: 10px !important;
-    background-color: white !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+  padding: 1.25rem !important;
+  border: 2px solid var(--bg-light) !important;
+  border-radius: 0.625rem !important;
+  background-color: var(--white) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
 }
 
-/* Estilo para botões */
+/* Botões */
 .stButton > button {
-    border: 2px solid #4a90e2 !important;
-    border-radius: 5px !important;
-    padding: 10px 20px !important;
-    background-color: #4a90e2 !important;
-    color: white !important;
-    font-weight: bold !important;
+  border: none !important;
+  border-radius: 0.375rem !important;
+  padding: 0.625rem 1.25rem !important;
+  background-color: var(--primary) !important;
+  color: var(--white) !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease;
 }
 
 .stButton > button:hover {
-    background-color: #357abd !important;
-    border-color: #357abd !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
 }
 
-/* Estilo para expanders */
+/* Expanders */
 .streamlit-expanderHeader {
-    border: 2px solid #e1e4e8 !important;
-    border-radius: 5px !important;
-    background-color: #f8f9fa !important;
-    padding: 10px !important;
+  border: 2px solid var(--bg-light) !important;
+  border-radius: 0.375rem !important;
+  background-color: var(--white) !important;
+  padding: 0.625rem !important;
+  transition: background-color 0.2s ease;
 }
 
-/* Estilo para métricas */
+/* Métricas */
 [data-testid="stMetricValue"] {
-    background-color: #f8f9fa !important;
-    padding: 10px !important;
-    border-radius: 5px !important;
-    border: 2px solid #e1e4e8 !important;
+  background-color: var(--bg-light) !important;
+  padding: 0.625rem !important;
+  border-radius: 0.375rem !important;
+  border: 2px solid var(--bg-light) !important;
+  font-weight: 600 !important;
 }
 
-/* Aplicar fonte Inter globalmente */
-body, 
-[class^="css"],
-[data-testid], 
-.stMarkdown,
-.stButton,
-.stSelectbox,
-.stTextInput,
-.stNumberInput,
-.stDataFrame {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+/* Tipografia */
+* {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
-/* Headings com Inter Bold */
 h1, h2, h3, h4, h5, h6,
 [data-testid="stMarkdownContainer"] h1,
 [data-testid="stMarkdownContainer"] h2,
 [data-testid="stMarkdownContainer"] h3 {
-    font-family: 'Inter', sans-serif !important;
-    font-weight: 700 !important;
+  font-weight: 700 !important;
+  line-height: 1.2;
 }
 
-/* Métricas com Inter */
 [data-testid="stMetricValue"] {
-    font-family: 'Inter', sans-serif !important;
-    font-weight: 600 !important;
+  font-weight: 600 !important;
 }
 
 [data-testid="stMetricLabel"] {
-    font-family: 'Inter', sans-serif !important;
-    font-weight: 500 !important;
+  font-weight: 500 !important;
 }
 
-/* Textos auxiliares com Inter Medium */
 .stMarkdown p,
 .stSubheader,
 [data-testid="stText"] {
-    font-family: 'Inter', sans-serif !important;
-    font-weight: 500 !important;
+  font-weight: 500 !important;
+  line-height: 1.5;
 }
+
+/* Tamanhos responsivos */
+h1 { font-size: clamp(1.5rem, 4vw, 2rem); }
+h2 { font-size: clamp(1.25rem, 3vw, 1.75rem); }
+h3 { font-size: clamp(1rem, 2.5vw, 1.5rem); }
+p { font-size: clamp(0.875rem, 2vw, 1rem); }
 
 /* Animações */
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slideIn {
-    from { opacity: 0; transform: translateX(-10px); }
-    to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Mobile-first styles */

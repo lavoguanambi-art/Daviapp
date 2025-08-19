@@ -7,17 +7,37 @@ from contextlib import contextmanager
 # --- Bibliotecas externas ---
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt  # Importando matplotlib corretamente as plt
+import matplotlib.pyplot as plt
 
-# ==== CONFIGURAÇÃO CSS ====
-def load_css():
-    """Carrega os estilos CSS do arquivo styles.css"""
-    css_path = Path("styles.css")
-    if css_path.exists():
-        with open(css_path, 'r', encoding='utf-8') as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+# --- DB robusto: importa local e como pacote (Cloud) ---
+try:
+    from db import engine, SessionLocal, Base
+except (ImportError, ModuleNotFoundError):
+    from .db import engine, SessionLocal, Base  # fallback quando rodar como pacote
 
-# ==== HELPER FUNCTIONS ====
+from sqlalchemy.orm import Session
+from sqlalchemy import select, text, inspect
+from babel.numbers import format_currency
+from babel.dates import format_date
+
+# --- Serviços/UI já existentes no projeto (mantidos) ---
+from services.giants import delete_giant
+from services.movements import create_income
+from services.buckets import split_income_by_buckets
+from ui import inject_mobile_ui, hamburger, bottom_nav
+from utils import load_css, money_br, date_br
+from models import User, Giant, GiantPayment, Bucket, Movement, Bill
+
+# ============ App Config ============
+st.set_page_config(
+    page_title="DaviApp",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Carregar estilos CSS do arquivo styles.css
+load_css()
 def format_currency(value, format_str="R$ {:.2f}"):
     """Format a number as currency"""
     return format_str.format(abs(value)).replace(".", ",")
@@ -527,198 +547,10 @@ def parse_money_br(s: str) -> float:
 
 # ============ App Config ============
 
+# ============ App Config ============
 
-st.markdown("""
-<style>
-/* Reset visual noise */
-[data-testid="stDecoration"], footer, #MainMenu, div[data-testid="stStatusWidget"] { display: none !important; }
-.block-container { padding-top: .25rem; padding-bottom: .5rem; }
-
-/* Simple and readable typography */
-html, body, [data-testid], .stMarkdown, .stText, .stButton, .stDataFrame {
-  -webkit-font-smoothing: antialiased;
-  font-family: -apple-system, system-ui, "Inter", "Segoe UI", Roboto, sans-serif;
-}
-
-/* Forms: full width and no text breaking */
-[data-testid="stForm"] { max-width: 420px; margin: .5rem auto; padding: .75rem .75rem; }
-.stTextInput > div > div > input,
-.stPassword > div > div > input,
-.stNumberInput > div > div > input,
-.stDateInput > div > div > input {
-    height: 44px !important;
-    font-size: 16px !important;
-    background: white !important;
-    border: 1px solid #E5E7EB !important;
-    border-radius: 6px !important;
-}
-    if css_path.exists():
-        st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
-
-load_css()  # chamar uma vez
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            text-rendering: optimizeLegibility;
-        }
-        
-        /* Input otimizado para mobile */
-        input, button {
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-        }
-        
-        /* Fix para flickering em mobile */
-        .stApp {
-            overflow-x: hidden;
-            max-width: 100vw;
-        }
-        
-        /* Prevenção de zoom indesejado em iOS */
-        input[type="text"],
-        input[type="password"] {
-            font-size: 16px !important;
-        }
-        
-        /* Otimizações mobile */
-        @media (max-width: 480px) {
-            .stApp {
-                padding: 0.25rem;
-            }
-            
-            .element-container {
-                margin: 0.25rem 0;
-            }
-            
-            .stButton > button {
-                width: 100%;
-                margin: 0.25rem 0;
-            }
-        }
-    </style>
-    """
-
-# Aplicar estilos otimizados
-st.markdown(get_cached_styles(), unsafe_allow_html=True)
-st.markdown("""
-    <style>
-        /* Performance */
-        [data-testid="stDecoration"] { display: none }
-        div.block-container { padding-top: 0; padding-bottom: 0; }
-        div[data-testid="stToolbar"] { display: none }
-        
-        /* Responsividade para mobile */
-        @media (max-width: 640px) {
-            .stApp {
-                padding: 0.5rem !important;
-            }
-            
-            /* Campos de formulário */
-            div[data-testid="stForm"] {
-                padding: 0.5rem !important;
-                max-width: 100% !important;
-            }
-            
-            div[data-testid="stForm"] > div:first-child {
-                padding: 0 !important;
-            }
-            
-            /* Inputs */
-            .stTextInput input, .stTextInput div[data-baseweb="input"] {
-                height: 2.5rem !important;
-                min-height: 2.5rem !important;
-                padding: 0.5rem !important;
-                font-size: 16px !important;
-                background-color: white !important;
-                border: 1px solid #E5E7EB !important;
-                border-radius: 0.375rem !important;
-            }
-            
-            .stTextInput label {
-                background: none !important;
-                padding: 0 !important;
-                font-size: 0.875rem !important;
-            }
-            
-            /* Botões */
-            .stButton button {
-                width: 100% !important;
-                padding: 0.625rem !important;
-                height: 2.75rem !important;
-                margin: 0.25rem 0 !important;
-            }
-            
-            /* Textos */
-            .stMarkdown p {
-                font-size: 0.875rem !important;
-                margin: 0.25rem 0 !important;
-            }
-            
-            /* DataFrames */
-            .stDataFrame {
-                font-size: 0.75rem !important;
-            }
-            
-            .stDataFrame [data-testid="stDataFrameDataCell"] {
-                padding: 0.375rem !important;
-            }
-        }
-        
-        /* Otimizações gerais */
-        * {
-            -webkit-font-smoothing: antialiased;
-            box-sizing: border-box;
-        }
-        
-        [data-testid="stSidebar"] [data-testid="stMarkdown"] {
-            min-height: 0;
-        }
-        
-        .stSpinner {
-            opacity: 0.5;
-        }
-        
-        /* Redução de animações */
-        @media (prefers-reduced-motion: reduce) {
-            * {
-                animation: none !important;
-                transition: none !important;
-            }
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# Otimização de performance para mobile
-st.markdown("""
-    <style>
-        /* Otimização de fonte e carregamento */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap&text=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789');
-        
-        /* Ajustes para mobile */
-        @media (max-width: 640px) {
-            .stApp {
-                padding: 0.5rem !important;
-            }
-            
-            /* Campos de texto e senha mais legíveis */
-            input[type="text"], input[type="password"] {
-                font-size: 16px !important;
-                background-color: white !important;
-                color: #111827 !important;
-                -webkit-text-fill-color: #111827 !important;
-                opacity: 1 !important;
-                border: 1px solid #E5E7EB !important;
-            }
-            
-            /* Melhorar toque em botões */
-            button {
-                min-height: 44px !important;
-                margin: 0.25rem 0 !important;
-            }
-            
-            /* Reduzir tamanho de elementos não essenciais */
-            .stMarkdown p {
-                margin-bottom: 0.5rem !important;
+# Carregar estilos CSS do arquivo styles.css
+load_css()
             }
             
             /* Otimizar tabelas */

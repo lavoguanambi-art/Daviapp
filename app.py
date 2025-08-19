@@ -1,10 +1,22 @@
 # --- imports robustos ---
+import streamlit as st
+
+# Configuração deve ser a primeira chamada Streamlit
+st.set_page_config(
+    page_title="App DAVI",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+    menu_items={
+        'About': 'App DAVI - Controle Financeiro Inteligente'
+    }
+)
+
 try:
     from db import engine, SessionLocal, Base
 except Exception:
     from .db import engine, SessionLocal, Base  # quando rodar como pacote
 
-import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
 import time, math, io, hashlib, os
@@ -493,11 +505,17 @@ section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
 }
 </style>
 """, unsafe_allow_html=True)
-    initial_sidebar_state="collapsed",
-    menu_items={
-        'About': 'App DAVI - Controle Financeiro Inteligente'
-    }
-)
+
+    # Configuração da página
+    st.set_page_config(
+        page_title="App DAVI",
+        page_icon="💰",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+        menu_items={
+            'About': 'App DAVI - Controle Financeiro Inteligente'
+        }
+    )
 
 # Cache e otimizações
 @st.cache_data(ttl=3600)

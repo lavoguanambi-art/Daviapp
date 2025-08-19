@@ -7,7 +7,7 @@ from contextlib import contextmanager
 # --- Bibliotecas externas ---
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt as plt
+import matplotlib.pyplot as plt  # Importando matplotlib corretamente as plt
 
 # ==== CONFIGURAÇÃO CSS ====
 def load_css():

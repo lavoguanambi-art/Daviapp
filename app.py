@@ -84,16 +84,81 @@ def parse_money_br(s: str) -> float:
     except Exception: return 0.0
 
 # ============ App Config ============
+# Configurações otimizadas para mobile
 st.set_page_config(
     page_title="DAVI",
-    layout="wide",
+    layout="centered",  # Mudado para centered para melhor performance
     initial_sidebar_state="collapsed",
     menu_items={
         'About': 'App DAVI - Controle Financeiro Inteligente'
     }
 )
 
-# Otimizações de performance e responsividade
+# Cache e otimizações
+@st.cache_data(ttl=3600)
+def get_cached_styles():
+    return """
+    <style>
+        /* Otimizações de Performance */
+        [data-testid="stDecoration"] { display: none }
+        footer { display: none }
+        #MainMenu { display: none }
+        div.block-container { padding: 0 }
+        
+        /* Reset Básico */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* Sistema de fontes otimizado */
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+        }
+        
+        /* Input otimizado para mobile */
+        input, button {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        
+        /* Fix para flickering em mobile */
+        .stApp {
+            overflow-x: hidden;
+            max-width: 100vw;
+        }
+        
+        /* Prevenção de zoom indesejado em iOS */
+        input[type="text"],
+        input[type="password"] {
+            font-size: 16px !important;
+        }
+        
+        /* Otimizações mobile */
+        @media (max-width: 480px) {
+            .stApp {
+                padding: 0.25rem;
+            }
+            
+            .element-container {
+                margin: 0.25rem 0;
+            }
+            
+            .stButton > button {
+                width: 100%;
+                margin: 0.25rem 0;
+            }
+        }
+    </style>
+    """
+
+# Aplicar estilos otimizados
+st.markdown(get_cached_styles(), unsafe_allow_html=True)
 st.markdown("""
     <style>
         /* Performance */
@@ -441,63 +506,61 @@ def main():
         # ==== Seção de Título e Slogan ====
         st.markdown("""
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap');
-                
-                [data-testid="stForm"] {
-                    max-width: 100%;
+                /* Estilo minimalista e otimizado */
+                .compact-login {
                     margin: 0 auto;
-                    padding: 1rem;
-                }
-                
-                .hero-section {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    margin: 0.5rem auto;
                     padding: 0.5rem;
                     max-width: 100%;
                     text-align: center;
                 }
                 
-                .brand-title {
-                    font-family: 'Inter', sans-serif;
-                    font-weight: 600;
-                    font-size: 2.5rem;
-                    line-height: 1;
+                .brand {
                     color: #1E40AF;
-                    margin: 0;
+                    font-family: system-ui, -apple-system, sans-serif;
+                    font-weight: 600;
+                    font-size: 1.75rem;
+                    margin: 0.5rem 0;
                     padding: 0;
                 }
                 
-                .brand-slogan {
-                    font-family: 'Inter', sans-serif;
-                    font-weight: 500;
-                    font-size: 1rem;
+                .slogan {
                     color: #10B981;
-                    margin: 0.5rem 0 1rem 0;
+                    font-family: system-ui, -apple-system, sans-serif;
+                    font-size: 0.875rem;
+                    margin: 0.25rem 0 1rem 0;
+                    opacity: 0.9;
                 }
                 
-                /* Ajustes responsivos */
-                @media (max-width: 640px) {
-                    .hero-section {
-                        margin: 0;
-                        padding: 0.5rem 0;
+                /* Form container */
+                [data-testid="stForm"] {
+                    background: white;
+                    padding: 1rem;
+                    border-radius: 0.5rem;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                    margin: 0.5rem auto;
+                    max-width: 320px;
+                }
+                
+                /* Mobile otimizado */
+                @media (max-width: 480px) {
+                    .compact-login {
+                        padding: 0.25rem;
                     }
-                    .brand-title {
-                        font-size: 2rem;
+                    .brand {
+                        font-size: 1.5rem;
                     }
-                    .brand-slogan {
-                        font-size: 0.875rem;
+                    .slogan {
+                        font-size: 0.75rem;
                     }
                     [data-testid="stForm"] {
-                        padding: 0.5rem;
+                        padding: 0.75rem;
+                        margin: 0.25rem auto;
                     }
                 }
             </style>
-            <div class="hero-section">
-                <h1 class="brand-title">DAVI</h1>
-                <h3 class="brand-slogan">Vença seus gigantes financeiros</h3>
+            <div class="compact-login">
+                <h1 class="brand">DAVI</h1>
+                <p class="slogan">Vença seus gigantes financeiros</p>
             </div>
         """, unsafe_allow_html=True)
         # ================================
@@ -507,65 +570,55 @@ def main():
         
         with tab1:
             with st.form("login_form", clear_on_submit=True):
+                # Estilo otimizado para formulário
                 st.markdown("""
                     <style>
-                        /* Container do formulário */
-                        section[data-testid="stForm"] {
-                            padding: 0 !important;
-                            max-width: 100% !important;
+                        /* Form Container */
+                        div[data-testid="stForm"] {
+                            background: white;
+                            border-radius: 8px;
+                            padding: 1rem !important;
+                            max-width: 320px !important;
+                            margin: 0 auto !important;
                         }
                         
-                        /* Campos de texto */
+                        /* Input fields */
                         .stTextInput input {
-                            height: 2.75rem !important;
-                            font-size: 16px !important;
-                            background-color: white !important;
-                            color: #111827 !important;
-                            -webkit-text-fill-color: #111827 !important;
-                            opacity: 1 !important;
-                            border: 1px solid #E5E7EB !important;
-                            border-radius: 0.375rem !important;
-                            padding: 0 0.75rem !important;
-                            margin: 0 !important;
-                        }
-                        
-                        /* Foco nos campos */
-                        .stTextInput input:focus {
-                            border-color: #1E40AF !important;
-                            box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.1) !important;
-                        }
-                        
-                        /* Labels */
-                        .stTextInput label {
-                            padding: 0 !important;
-                            margin-bottom: 0.25rem !important;
-                            color: #374151 !important;
-                            font-size: 0.875rem !important;
-                            font-weight: 500 !important;
-                        }
-                        
-                        /* Botão de submit */
-                        .stButton button {
                             width: 100% !important;
-                            height: 2.75rem !important;
-                            background-color: #1E40AF !important;
+                            height: 44px !important;
+                            padding: 8px 12px !important;
+                            font-size: 16px !important;
+                            border: 1px solid #E5E7EB !important;
+                            border-radius: 6px !important;
+                            background: white !important;
+                            color: #111827 !important;
+                            margin: 4px 0 !important;
+                        }
+                        
+                        /* Submit button */
+                        .stButton > button {
+                            width: 100% !important;
+                            height: 44px !important;
+                            background: #1E40AF !important;
                             color: white !important;
+                            border: none !important;
+                            border-radius: 6px !important;
+                            font-size: 16px !important;
                             font-weight: 500 !important;
-                            margin-top: 0.5rem !important;
+                            margin: 8px 0 !important;
+                            cursor: pointer !important;
                         }
                         
-                        /* Checkbox */
-                        .stCheckbox label {
-                            font-size: 0.875rem !important;
-                            color: #374151 !important;
-                        }
-                        
-                        @media (max-width: 640px) {
-                            .stTextInput input {
-                                height: 2.5rem !important;
+                        /* Mobile adjustments */
+                        @media (max-width: 480px) {
+                            div[data-testid="stForm"] {
+                                padding: 12px !important;
                             }
-                            .stButton button {
-                                height: 2.5rem !important;
+                            .stTextInput input {
+                                height: 40px !important;
+                            }
+                            .stButton > button {
+                                height: 40px !important;
                             }
                         }
                     </style>

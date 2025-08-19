@@ -1,41 +1,121 @@
-# --- imports robustos ---
-import streamlit as st
+# ==== IMPORTS INICIAIS (SEM DUPLICATAS) ====
+import os, sys, time, math, io, hashlib
+from pathlib import Path
+from datetime import date, datetime, timedelta
+from contextlib import contextmanager
 
-# Configuração deve ser a primeira chamada Streamlit
+# --- Bibliotecas externas ---
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+
+# ==== HELPER FUNCTIONS ====
+def format_currency(value, format_str="R$ {:.2f}"):
+    """Format a number as currency"""
+    return format_str.format(abs(value)).replace(".", ",")
+
+def money_br(value):
+    """Format a number as Brazilian currency"""
+    return format_currency(value)
+
+def create_bucket(db, user, name, tipo, description, percent):
+    """Create a new bucket"""
+    bucket = Bucket(
+        user_id=user.id,
+        name=name,
+        description=description,
+        percent=float(percent),
+        type=tipo.lower()
+    )
+    db.add(bucket)
+    db.commit()
+    return bucket
+from babel.numbers import format_currency
+from babel.dates import format_date
+
+# --- DB robusto: importa local e como pacote (Cloud) ---
+try:
+    from db import engine, SessionLocal, Base
+except (ImportError, ModuleNotFoundError):
+    from .db import engine, SessionLocal, Base  # fallback quando rodar como pacote
+
+from sqlalchemy.orm import Session
+from sqlalchemy import select, text, inspect
+
+# --- Serviços/UI já existentes no projeto (mantidos) ---
+from services.giants import delete_giant
+from services.movements import create_income
+from services.buckets import split_income_by_buckets
+from ui import inject_mobile_ui, hamburger, bottom_nav
+from models import (
+    User, Bucket, Giant, Movement, Bill,
+    UserProfile, GiantPayment
+)
+from ui_utils import (
+    mobile_friendly_button,
+    mobile_friendly_table,
+    show_confirmation_dialog,
+    show_action_buttons
+)
+from utils import money_br, date_br
+from giant_manager import render_plano_ataque, get_giant_payments, get_total_paid
+from db_helpers import (
+    tx, init_db_pragmas, delete_giant, distribuir_por_baldes,
+    giant_forecast, check_giant_victory
+)
+from app_utils import (
+    safe_dataframe, dias_do_mes, ensure_daily_allocation,
+    daily_budget_for_giants, celebrate_victory
+)
+
+# ==== CONFIGURAÇÃO DE PÁGINA (ALINHADA À ESQUERDA, FORA DE FUNÇÕES) ====
 st.set_page_config(
     page_title="App DAVI",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
-    menu_items={
-        'About': 'App DAVI - Controle Financeiro Inteligente'
-    }
+    menu_items={'About': 'App DAVI - Controle Financeiro Inteligente'}
 )
 
-try:
-    from db import engine, SessionLocal, Base
-except Exception:
-    from .db import engine, SessionLocal, Base  # quando rodar como pacote
+# --- configuração da UI mobile ---
+inject_mobile_ui()
+hamburger()
 
-import pandas as pd
-from datetime import date, datetime, timedelta
-import time, math, io, hashlib, os
-from typing import Optional, Tuple
-from sqlalchemy.orm import Session
-from sqlalchemy import select, text, inspect
+from contextlib import contextmanager
 
-from services.giants import delete_giant
-from services.movements import create_income
-from services.buckets import split_income_by_buckets
-from ui import inject_mobile_ui, hamburger, bottom_nav
-
-# Cache da sessão do banco
 @st.cache_resource
 def _session_factory():
-    return SessionLocal
+    return SessionLocal  # classe de sessão
 
+@contextmanager
 def get_db():
-    return _session_factory()()
+    db = _session_factory()()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def show_giants_table(df: pd.DataFrame):
+    # tipagem segura
+    for col in ("ID", "total", "paid", "remaining"):
+        if col in df.columns:
+            if col == "ID":
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", format="%d", width="small"),
+            "name": st.column_config.TextColumn("Nome"),
+            "total": st.column_config.NumberColumn("Total", format="R$ %,.2f"),
+            "paid": st.column_config.NumberColumn("Pago", format="R$ %,.2f"),
+            "remaining": st.column_config.NumberColumn("Restante", format="R$ %,.2f"),
+        },
+    )
 
 def load_user_data(db: Session, user_id: int) -> dict:
     """Carrega todos os dados do usuário."""
@@ -128,14 +208,6 @@ from db_helpers import (tx, init_db_pragmas, delete_giant, distribuir_por_baldes
                        giant_forecast, check_giant_victory)
 from app_utils import (safe_dataframe, dias_do_mes, ensure_daily_allocation, 
                       daily_budget_for_giants, celebrate_victory)
-
-# Performance Configuration
-st.set_page_config(
-    page_title="DAVI",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-    menu_items={'About': 'App DAVI - Controle Financeiro'}
-)
 
 # Mobile first & UI improvements
 st.markdown("""
@@ -313,8 +385,6 @@ plt.rcParams.update({
     'axes.labelcolor': '#111827',
     'xtick.color': '#6B7280',
     'ytick.color': '#6B7280',
-    'axes.spines.top': False,
-    'axes.spines.right': False,
     'figure.autolayout': True,
     'font.size': 10,
     'axes.labelsize': 12,
@@ -447,11 +517,7 @@ def parse_money_br(s: str) -> float:
     except Exception: return 0.0
 
 # ============ App Config ============
-# Configurações otimizadas para mobile
-st.set_page_config(
-    page_title="DAVI",
-    layout="centered"  # Centered for better performance
-)
+
 
 st.markdown("""
 <style>
@@ -471,73 +537,16 @@ html, body, [data-testid], .stMarkdown, .stText, .stButton, .stDataFrame {
 .stPassword > div > div > input,
 .stNumberInput > div > div > input,
 .stDateInput > div > div > input {
-  height: 44px !important; font-size: 16px !important;
-  border: 1px solid #E5E7EB !important; border-radius: 8px !important;
+    height: 44px !important;
+    font-size: 16px !important;
+    background: white !important;
+    border: 1px solid #E5E7EB !important;
+    border-radius: 6px !important;
 }
-[data-testid="stCheckbox"] label { white-space: nowrap !important; }  /* Keep "Manter conectado" in one line */
+    if css_path.exists():
+        st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-/* Larger buttons for touch */
-.stButton button {
-  min-height: 44px; font-weight: 600; border-radius: 10px;
-}
-button[kind="primary"] { background: #1E40AF !important; color: #fff !important; }
-button[kind="secondary"] { color: #1E40AF !important; border-color: #1E40AF !important; }
-
-/* Dataframes: horizontal scroll on mobile, fixed header */
-[data-testid="stDataFrame"] div[role="table"] { overflow-x: auto; }
-[data-testid="stDataFrame"] { font-size: 14px; }
-
-/* Harmonized sidebar + visual "hamburger" */
-section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] button { color: #1E40AF !important; }
-.stApp:before {
-  content: "☰"; position: fixed; left: 14px; top: 12px; z-index: 999;
-  font-size: 22px; color: #1E40AF; opacity: .9;
-}
-/* Avoid overwriting native Safari icons */
-@supports (-webkit-touch-callout: none) {
-  .stApp:before { top: 10px; }
-}
-
-/* iOS/Safari dark mode: maintain contrast */
-@media (prefers-color-scheme: dark) {
-  body { background: #0b0f15 !important; }
-}
-</style>
-""", unsafe_allow_html=True)
-
-    # Configuração da página
-    st.set_page_config(
-        page_title="App DAVI",
-        page_icon="💰",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-        menu_items={
-            'About': 'App DAVI - Controle Financeiro Inteligente'
-        }
-    )
-
-# Cache e otimizações
-@st.cache_data(ttl=3600)
-def get_cached_styles():
-    return """
-    <style>
-        /* Otimizações de Performance */
-        [data-testid="stDecoration"] { display: none }
-        footer { display: none }
-        #MainMenu { display: none }
-        div.block-container { padding: 0 }
-        
-        /* Reset Básico */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        /* Sistema de fontes otimizado */
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
+load_css()  # chamar uma vez
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: optimizeLegibility;
@@ -796,13 +805,7 @@ def init_session_data():
     if "editing_total" not in st.session_state:
         st.session_state.editing_total = False
         
-def logout():
-    st.session_state.authenticated = False
-    st.session_state.user = None
-    st.session_state.saved_user = None
-    st.rerun()
-    if "menu" not in st.session_state:
-        st.session_state.menu = "Dashboard"
+# Função logout() já definida anteriormente
     if "confirmar_exclusao" not in st.session_state:
         st.session_state.confirmar_exclusao = {}
     if "confirmar_exclusao_balde" not in st.session_state:
@@ -991,6 +994,396 @@ def load_cached_data(user_id: int):
     bills = load_user_bills(user_id)
     movements, _ = load_user_movements(user_id, page=1)
     return profile, buckets, giants, movements, bills
+
+def render_dashboard_header():
+    st.markdown('<h1 class="animate-slide-in">📊 Visão Geral</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+
+def format_currency(value, format_str="R$ {:.2f}"):
+    """Format a number as currency"""
+    return format_str.format(abs(value)).replace(".", ",")
+
+def money_br(value):
+    """Format a number as Brazilian currency"""
+    return format_currency(value)
+
+def render_financial_metrics(movements):
+    # Calcular métricas com base nos movimentos
+    total_receitas = sum(m.amount for m in movements if m.kind == "Receita")
+    total_despesas = sum(m.amount for m in movements if m.kind == "Despesa")
+    saldo_atual = total_receitas - total_despesas
+    
+    # Métricas principais com estilos personalizados
+    st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Receitas", money_br(total_receitas))
+    with col2:
+        st.metric("Total de Despesas", money_br(total_despesas))
+    with col3:
+        st.metric("Saldo", money_br(saldo_atual))
+    return total_receitas, total_despesas, saldo_atual
+
+def render_recent_movements(movements):
+    if movements:
+        st.subheader("📝 Movimentações Recentes")
+        df = pd.DataFrame([{
+            "Data": m.created_at.strftime("%d/%m/%Y"),
+            "Tipo": m.kind,
+            "Valor": money_br(m.amount),
+            "Descrição": m.description
+        } for m in movements])
+        df = df.sort_values("Data", ascending=False)
+        st.dataframe(df.head(10), use_container_width=True)
+
+def handle_dashboard(db, user, profile, buckets, giants, movements, bills):
+    render_dashboard_header()
+    total_receitas, total_despesas, saldo_atual = render_financial_metrics(movements)
+    render_recent_movements(movements)
+
+def handle_livro_caixa(db, user, profile, buckets, giants, movements, bills):
+    st.header("📚 Livro Caixa")
+            
+    # Botões de ação no topo
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+    with col1:
+        if st.button("🧹 Limpar Tudo"):
+            if movements:
+                st.session_state["confirmar_limpar"] = True
+    with col2:
+        if movements:
+            csv = pd.DataFrame([{
+                "ID": m.id,
+                "Data": m.created_at.strftime("%d/%m/%Y"),
+                "Tipo": m.kind,
+                "Balde": next((b.name for b in buckets if b.id == m.bucket_id), ""),
+                "Valor": money_br(m.amount),
+                "Descrição": m.description
+            } for m in movements])
+            download_csv(csv, "livro_caixa.csv", "📥 Exportar CSV", use_container_width=True)
+    with col3:
+        if st.button("↻ Atualizar", type="primary"):
+            st.cache_data.clear()
+            st.rerun()
+    with col4:
+        st.markdown(custom_css.text_right, unsafe_allow_html=True)
+        
+    # Add confirmation dialog for cleanup
+    if st.session_state.get("confirmar_limpar", False):
+        if st.warning("⚠️ Tem certeza que deseja limpar todo o livro caixa?"):
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✓ Sim, limpar tudo"):
+                    with db.begin():
+                        db.query(Movement).filter_by(user_id=user.id).delete()
+                    st.success("Livro caixa limpo com sucesso!")
+                    st.session_state["confirmar_limpar"] = False
+                    st.cache_data.clear()
+                    st.rerun()
+            with col2:
+                if st.button("✗ Não, cancelar"):
+                    st.session_state["confirmar_limpar"] = False
+                    st.rerun()
+
+def handle_calendario(db, user, profile):
+    st.header("📅 Calendário")
+    # Add Calendario specific content here
+
+def handle_atrasos_riscos(db, user, profile):
+    st.header("⚠️ Atrasos & Riscos")
+    # Add Atrasos & Riscos specific content here
+
+def handle_importar_extrato(db, user):
+    st.header("📥 Importar Extrato")
+    # Add Importar Extrato specific content here
+
+def handle_configuracoes(db, user, profile):
+    st.header("⚙️ Configurações")
+    # Add Configuracoes specific content here
+
+def handle_baldes(db, user):
+    st.header("🪣 Baldes")
+    
+    # Form para criar novo balde no topo
+    st.markdown("### ➕ Novo Balde")
+    with st.form("novo_balde"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nome = st.text_input("Nome do Balde", placeholder="Ex: C6")
+            tipo = st.text_input("Tipo do Balde", placeholder="Ex: Dízimo")
+        with col2:
+            prioridade = st.number_input("Prioridade", min_value=1, step=1)
+            perc = st.number_input("Porcentagem (%)", min_value=0, max_value=100, step=1)
+        
+        if st.form_submit_button("Criar Balde"):
+            if nome and tipo:
+                bucket = Bucket(
+                    user_id=user.id,
+                    name=f"{nome} - {tipo}",
+                    description=f"Prioridade: {prioridade}",
+                    percent=float(perc),
+                    type=tipo.lower()
+                )
+                db.add(bucket)
+                db.commit()
+                st.success(f"Balde criado: {nome} - {tipo} - {perc}%")
+                st.rerun()
+
+def handle_plano_ataque(db, user, profile, buckets, giants, movements, bills):
+    # Usar a nova versão otimizada do Plano de Ataque
+    render_plano_ataque(db, giants)
+    
+    # Mobile-optimized styles
+    st.markdown("""
+        <style>
+            .stDataFrame {
+                font-size: 0.875rem !important;
+            }
+            @media (max-width: 640px) {
+                .stDataFrame {
+                    font-size: 0.75rem !important;
+                }
+                div[data-testid="column"] {
+                    width: 100% !important;
+                    flex: 1 1 100% !important;
+                    margin-bottom: 0.5rem !important;
+                }
+            }
+            div[data-testid="stForm"] {
+                background: white;
+                padding: 1rem;
+                border-radius: 0.5rem;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                margin: 0.5rem 0;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Lista de Giants existentes
+    if giants:
+        st.subheader("Gigantes Ativos")
+        
+        # Previsões
+        st.caption("⏱️ Previsões")
+        for g in giants:
+            restante, diaria, dias = giant_forecast(g, db)
+            txt = f"• **{g.name}** — Restante: {money_br(restante)} | Meta diária: {money_br(diaria)}"
+            txt += f" | ~ **{math.ceil(dias)}** dias" if dias else " | defina a Meta semanal"
+            st.markdown(txt)
+        
+        # Usar expander para mostrar/esconder instruções em mobile
+        with st.expander("ℹ️ Como usar"):
+            st.markdown("""
+                - Toque nos botões ✏️ para editar
+                - Toque em 🗑️ para excluir
+                - Deslize para ver mais informações
+            """)
+
+def handle_entrada_saida(db, user, profile, buckets, giants, movements, bills):
+    st.header("💰 Entrada e Saída")
+            
+    # Mostrar saldo atual dos baldes
+    if buckets:
+        st.subheader("📊 Saldo dos Baldes")
+        total_baldes = sum(b.balance for b in buckets)
+        
+        # Botão para editar saldos
+        col_total, col_edit, col_edit_total, col_space = st.columns([1, 0.5, 0.5, 1.5])
+        with col_total:
+            st.metric("Saldo Total", money_br(total_baldes))
+        with col_edit:
+            if st.button("✏️ Editar Baldes", key="edit_balances"):
+                st.session_state["editing_balances"] = True
+        with col_edit_total:
+            if st.button("💰 Editar Total", key="edit_total"):
+                st.session_state["editing_total"] = True
+    
+        # Form para editar saldo total
+        if st.session_state.get("editing_total", False):
+            with st.form("editar_total"):
+                novo_total = st.number_input("Novo Saldo Total", value=float(total_baldes), step=100.0, format="%.2f")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾 Salvar"):
+                        if novo_total >= 0:
+                            # Distribuir proporcionalmente pelos baldes
+                            total_percent = sum(b.percent for b in buckets)
+                            for bucket in buckets:
+                                perc_norm = (bucket.percent / total_percent) if total_percent > 0 else 0
+                                bucket.balance = novo_total * perc_norm
+                            db.commit()
+                            st.success("Saldo total ajustado e distribuído!")
+                            st.session_state["editing_total"] = False
+                            st.rerun()
+                        else:
+                            st.error("O saldo total não pode ser negativo")
+                with col2:
+                    if st.form_submit_button("❌ Cancelar"):
+                        st.session_state["editing_total"] = False
+                        st.rerun()
+        
+        # Form para editar saldos
+        if st.session_state.get("editing_balances", False):
+            with st.form("editar_saldos"):
+                st.write("Ajustar saldos dos baldes:")
+                new_balances = {}
+                cols = st.columns(3)
+                for idx, bucket in enumerate(buckets):
+                    with cols[idx % 3]:
+                        new_value = st.number_input(
+                            f"Saldo {bucket.name}",
+                            value=float(bucket.balance),
+                            step=10.0,
+                            format="%.2f"
+                        )
+                        new_balances[bucket.id] = new_value
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾 Salvar"):
+                        for bucket in buckets:
+                            bucket.balance = new_balances[bucket.id]
+                        db.commit()
+                        st.session_state["editing_balances"] = False
+                        st.success("Saldos atualizados!")
+                        st.rerun()
+                with col2:
+                    if st.form_submit_button("❌ Cancelar"):
+                        st.session_state["editing_balances"] = False
+                        st.rerun()
+
+def handle_calendario(db, user, profile):
+    """Handle the Calendar section"""
+    st.header("📅 Calendário")
+    
+    # Exibir data atual no calendário
+    hoje = date.today()
+    amanha = hoje + timedelta(days=1)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"📆 **{hoje.strftime('%d/%m/%Y')}**")
+    with col2:
+        st.markdown(f"⏰ **{amanha.strftime('%d/%m/%Y')}** (amanhã)")
+    
+    # Exibir contas do dia
+    contas = load_user_bills(db, user.id)
+    if contas:
+        contas_hoje = [b for b in contas if b.due_date == hoje]
+        contas_amanha = [b for b in contas if b.due_date == amanha]
+        
+        if contas_hoje:
+            st.subheader("Contas de Hoje")
+            for conta in contas_hoje:
+                st.markdown(f"• {conta.name}: {money_br(conta.amount)}")
+                
+        if contas_amanha:
+            st.subheader("Contas de Amanhã")
+            for conta in contas_amanha:
+                st.markdown(f"• {conta.name}: {money_br(conta.amount)}")
+
+def handle_atrasos_riscos(db, user, profile):
+    """Handle the Delays & Risks section"""
+    st.header("⚠️ Atrasos & Riscos")
+    
+    hoje = date.today()
+    contas = load_user_bills(db, user.id)
+    if contas:
+        contas_atrasadas = [b for b in contas if b.due_date < hoje and not b.paid]
+        contas_futuras = [b for b in contas if b.due_date > hoje]
+        
+        # Tabela de atrasos
+        if contas_atrasadas:
+            st.subheader("📊 Contas Atrasadas")
+            st.caption(f"{len(contas_atrasadas)} contas em atraso")
+            df = pd.DataFrame([{
+                "ID": b.id,
+                "Nome": b.name,
+                "Valor": money_br(b.amount),
+                "Vencimento": b.due_date.strftime("%d/%m/%Y"),
+                "Atraso": f"{(hoje - b.due_date).days} dias"
+            } for b in contas_atrasadas])
+            st.dataframe(df.sort_values("Vencimento"), use_container_width=True)
+        
+        # Próximos vencimentos
+        if contas_futuras:
+            st.subheader("📅 Próximos Vencimentos")
+            df = pd.DataFrame([{
+                "ID": b.id,
+                "Nome": b.name,
+                "Valor": money_br(b.amount),
+                "Vencimento": b.due_date.strftime("%d/%m/%Y"),
+                "Dias": f"{(b.due_date - hoje).days} dias"
+            } for b in contas_futuras])
+            st.dataframe(df.sort_values("Vencimento").head(5), use_container_width=True)
+    else:
+        st.info("Nenhuma conta cadastrada ainda!")
+
+def handle_importar_extrato(db, user):
+    """Handle the Import Statement section"""
+    st.header("📥 Importar Extrato")
+    st.info("Funcionalidade em desenvolvimento!")
+
+def handle_configuracoes(db, user, profile):
+    """Handle the Settings section"""
+    st.header("⚙️ Configurações")
+    
+    # Form para editar perfil
+    with st.form("editar_perfil"):
+        st.subheader("Perfil")
+        renda_mensal = st.number_input("Renda Mensal", value=profile.monthly_income, min_value=0.0, step=100.0)
+        despesa_mensal = st.number_input("Despesa Mensal", value=profile.monthly_expense, min_value=0.0, step=100.0)
+        if st.form_submit_button("💾 Salvar"):
+            profile.monthly_income = renda_mensal
+            profile.monthly_expense = despesa_mensal
+            db.commit()
+            st.success("Perfil atualizado!")
+            st.rerun()
+
+def get_menu_handler(menu):
+    """Get the appropriate menu handler function based on menu name"""
+    menu_mapping = {
+        "Dashboard": handle_dashboard,
+        "Baldes": handle_baldes,
+        "Plano de Ataque": handle_plano_ataque,
+        "Entrada e Saída": handle_entrada_saida,
+        "Livro Caixa": handle_livro_caixa,
+        "Calendário": handle_calendario,
+        "Atrasos & Riscos": handle_atrasos_riscos,
+        "Importar Extrato": handle_importar_extrato,
+        "Configurações": handle_configuracoes
+    }
+    return menu_mapping.get(menu)
+
+def handle_menu_items(menu, user, db, profile, buckets, giants, movements, bills):
+    """Handle menu navigation and render appropriate content"""
+    # Handle menu navigation
+    if menu == "Dashboard":
+        handle_dashboard(db, user, profile, buckets, giants, movements, bills)
+    elif menu == "Baldes":
+        handle_baldes(db, user)
+    elif menu == "Plano de Ataque":
+        handle_plano_ataque(db, user, profile, buckets, giants, movements, bills)
+    elif menu == "Entrada e Saída":
+        handle_entrada_saida(db, user, profile, buckets, giants, movements, bills)
+    elif menu == "Livro Caixa":
+        handle_livro_caixa(db, user, profile, buckets, giants, movements, bills)
+    elif menu == "Calendário":
+        handle_calendario(db, user, profile)
+    elif menu == "Atrasos & Riscos":
+        handle_atrasos_riscos(db, user, profile)
+    elif menu == "Importar Extrato":
+        handle_importar_extrato(db, user)
+    elif menu == "Configurações":
+        handle_configuracoes(db, user, profile)
+    else:
+        st.info("Seção em desenvolvimento!")
+    
+    handler = menu_handlers.get(menu)
+    if handler:
+        handler()
+    else:
+        st.info("Seção em desenvolvimento!")
 
 @auth_required
 def main():
@@ -1386,27 +1779,17 @@ def main():
                     st.rerun()
             
             menu = st.session_state.menu
+            
+            # Handle menu navigation
+            handle_menu_items(menu, user, db, profile, buckets, giants, movements, bills)
         
         # Barra de navegação mobile no rodapé
-        bottom_nav([
-            {"icon": "📊", "label": "Dashboard"},
-            {"icon": "🎯", "label": "Plano"},
-            {"icon": "🪣", "label": "Baldes"},
-            {"icon": "💰", "label": "Entradas"}
-        ])
+        bottom_nav(active="dashboard" if menu == "Dashboard" else
+                  "plan" if menu == "Plano de Ataque" else
+                  "buckets" if menu == "Baldes" else
+                  "income" if menu == "Entrada e Saída" else "home")
         
-        # Dashboard
-        if menu == "Dashboard":
-            st.markdown('<h1 class="animate-slide-in">📊 Visão Geral</h1>', unsafe_allow_html=True)
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            
-            # Calcular métricas com base nos movimentos
-            total_receitas = sum(m.amount for m in movements if m.kind == "Receita")
-            total_despesas = sum(m.amount for m in movements if m.kind == "Despesa")
-            saldo_atual = total_receitas - total_despesas
-            
-            # Métricas principais com estilos personalizados
-            st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
+        # Handle menu navigation
             col1, col2, col3 = st.columns(3)
             
             with col1:
@@ -1566,29 +1949,55 @@ def main():
 
                 # ------- Formatação e exibição dos gigantes -------
                 df_giants = pd.DataFrame(rows)
-                # Formatar valores monetários antes
-                for colm in ["Total", "Pago", "Restante"]:
-                    df_giants[colm] = df_giants[colm].apply(money_br)
-                
-                # Exibir com configuração otimizada
+
+                # Configurar colunas
                 st.dataframe(
                     df_giants,
                     column_config={
-                        "ID": st.column_config.NumberColumn("ID"),
-                        "Nome": st.column_config.TextColumn("Nome"),
-                        "Total": st.column_config.TextColumn("Total"),
-                        "Pago": st.column_config.TextColumn("Pago"),
-                        "Restante": st.column_config.TextColumn("Restante"),
-                        "Progresso": st.column_config.ProgressColumn("Progresso", min_value=0.0, max_value=1.0, format="%.0f%%"),
+                        "Progresso": st.column_config.ProgressColumn(
+                            "Progresso",
+                            min_value=0.0,
+                            max_value=1.0,
+                            format="%.0f%%"
+                        ),
                         "Meta Semanal": st.column_config.TextColumn("Meta Semanal"),
                         "Status": st.column_config.TextColumn("Status"),
-                        "Taxa": st.column_config.TextColumn("Taxa Mensal"),
-                    },
-                    hide_index=True,
-                    use_container_width=True,
+                        "Taxa": st.column_config.TextColumn("Taxa Mensal")
+                    }
                 )
-                
-                # Ações rápidas
+
+                # Formatar valores monetários antes
+                for colm in ["Total", "Pago", "Restante"]:
+                    df_giants[colm] = df_giants[colm].apply(money_br)
+
+                def render_giants_rows(df: pd.DataFrame, user_id: int):
+                    for _, row in df.iterrows():
+                        c1,c2,c3,c4,c5,c6 = st.columns([2,4,3,3,3,2])
+                        with c1: st.write(f"**#{int(row['ID'])}**")
+                        with c2: st.write(row["Nome"])
+                        with c3: st.write(f"{row['Total']}".replace(",", "X").replace(".", ",").replace("X", "."))
+                        with c4: st.write(f"{row['Pago']}".replace(",", "X").replace(".", ",").replace("X", "."))
+                        with c5: st.write(f"{row['Restante']}".replace(",", "X").replace(".", ",").replace("X", "."))
+                        with c6:
+                            b1,b2 = st.columns(2)
+                            if b1.button("✏️", key=f"edit_{row['ID']}"):
+                                st.session_state.edit_giant_id = int(row["ID"])
+                                st.rerun()
+                            if b2.button("🗑️", key=f"del_{row['ID']}"):
+                                try:
+                                    with get_db() as db:
+                                        uid = st.session_state.auth["user_id"] if "auth" in st.session_state else st.session_state.user.id
+                                        ok = delete_giant(db, int(row["ID"]), uid)
+                                        if ok:
+                                            st.toast("🗑️ Excluído!")
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        else:
+                                            st.toast("Não foi possível excluir")
+                                except Exception as e:
+                                    st.error(f"Erro ao excluir: {e}")
+
+                render_giants_rows(df_giants, st.session_state.auth["user_id"])
                 st.caption("Ações rápidas")
                 for g in rows:
                     c1, c2, c3 = st.columns([5,2,2])
@@ -1735,11 +2144,11 @@ def main():
                                     db = get_db()
                                     # Garante que temos os parâmetros corretos
                                     user_id = st.session_state.user
-                                    if not user_id:
+                                    if user_id:
+                                        result = delete_giant(db, giant['ID'], user_id)
+                                    else:
                                         st.error("Usuário não encontrado")
-                                        return
-                                        
-                                    result = delete_giant(db, giant['ID'], user_id)
+                                        result = False
                                     if result:
                                         st.success(f"Gigante {giant['Nome']} excluído com sucesso!")
                                         st.cache_data.clear()
@@ -1753,31 +2162,7 @@ def main():
                                 finally:
                                     if "confirming_delete" in st.session_state:
                                         del st.session_state.confirming_delete
-                                <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:0.75rem;'>
-                                    <div>
-                                        <div style='color:#6B7280;font-size:0.75rem;'>Total</div>
-                                        <div style='color:#111827;font-weight:500;'>{giant['Total']}</div>
-                                    </div>
-                                    <div>
-                                        <div style='color:#6B7280;font-size:0.75rem;'>Pago</div>
-                                        <div style='color:#059669;font-weight:500;'>{giant['Pago']}</div>
-                                    </div>
-                                    <div>
-                                        <div style='color:#6B7280;font-size:0.75rem;'>Resta</div>
-                                        <div style='color:#DC2626;font-weight:500;'>{giant['Restante']}</div>
-                                    </div>
-                                </div>
-                                <div style='width:100%;background:#f3f4f6;height:0.5rem;border-radius:0.25rem;overflow:hidden;'>
-                                    <div style='
-                                        background:linear-gradient(90deg, #059669, #10B981);
-                                        width:{giant['Progresso']*100}%;
-                                        height:100%;
-                                        border-radius:0.25rem;
-                                        transition:width 0.3s ease;
-                                    '></div>
-                                </div>
-                            </div>
-                        """, unsafe_allow_html=True)
+
                         
                         # Handle edit/delete actions via session state
                         if f"edit_{giant['ID']}" not in st.session_state:
@@ -2079,35 +2464,19 @@ def main():
                     else:
                         st.error("⚠️ Preencha o nome e valor do Gigante")
         
-        # Baldes
-        elif menu == "Baldes":
-            st.header("🪣 Baldes")
-            
-            # Form para criar novo balde no topo
-            st.markdown("### ➕ Novo Balde")
-            with st.form("novo_balde"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    nome = st.text_input("Nome do Balde", placeholder="Ex: C6")
-                    tipo = st.text_input("Tipo do Balde", placeholder="Ex: Dízimo")
-                with col2:
-                    prioridade = st.number_input("Prioridade", min_value=1, step=1)
-                    perc = st.number_input("Porcentagem (%)", min_value=0, max_value=100, step=1)
-                
-                if st.form_submit_button("Criar Balde"):
-                    if nome and tipo:
-                        bucket = Bucket(
-                            user_id=user.id,
-                            name=f"{nome} - {tipo}",
-                            description=f"Prioridade: {prioridade}",
-                            percent=float(perc),
-                            type=tipo.lower()
-                        )
-                        db.add(bucket)
-                        db.commit()
-                        st.success(f"Balde criado: {nome} - {tipo} - {perc}%")
-                        st.rerun()
-                    else:
+# Helper functions for bucket management
+def create_bucket(db, user, name, tipo, description, percent):
+    """Create a new bucket"""
+    bucket = Bucket(
+        user_id=user.id,
+        name=name,
+        description=description,
+        percent=float(percent),
+        type=tipo.lower()
+    )
+    db.add(bucket)
+    db.commit()
+    return bucket
                         st.error("Preencha o nome e tipo do balde")
             
             st.markdown("<hr style='margin: 1.5rem 0'>", unsafe_allow_html=True)
@@ -2153,19 +2522,7 @@ def main():
                                 st.error("Erro ao excluir balde. Tente novamente.")
                     st.markdown("<hr style='margin: 0.5rem 0'>", unsafe_allow_html=True)
         
-        # Entrada e Saída
-        elif menu == "Entrada e Saída":
-            st.header("� Entrada e Saída")
-            
-            # Mostrar saldo atual dos baldes
-            if buckets:
-                st.subheader("📊 Saldo dos Baldes")
-                total_baldes = sum(b.balance for b in buckets)
-                
-                # Botão para editar saldos
-                col_total, col_edit, col_edit_total, col_space = st.columns([1, 0.5, 0.5, 1.5])
-                with col_total:
-                    st.metric("Saldo Total", money_br(total_baldes))
+
                 with col_edit:
                     if st.button("✏️ Editar Baldes", key="edit_balances"):
                         st.session_state["editing_balances"] = True
@@ -2238,114 +2595,46 @@ def main():
             
             st.divider()
             
-            with st.form("nova_entrada"):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    tipo = st.selectbox("Tipo", ["Entrada", "Saída", "Retirada"])
-                    valor = st.number_input("Valor", min_value=0.0, step=10.0)
-                    desc = st.text_input("Descrição")
-                with col2:
-                    data_mov = st.date_input("Data", value=date.today(), format="DD/MM/YYYY")
-                
-                # Se for despesa, seleciona o balde
-                if tipo == "Despesa":
-                    bucket_id = st.selectbox(
-                        "Balde",
-                        options=[b.id for b in buckets],
-                        format_func=lambda x: next(b.name for b in buckets if b.id == x)
-                    ) if buckets else None
-                
-                if st.form_submit_button("Registrar"):
-                    if not desc:
-                        st.error("Informe uma descrição.")
-                        return
-                        
+            with st.form("nova_entrada", clear_on_submit=True, border=True):
+                valor = st.number_input("Valor", min_value=0.0, step=10.0, format="%.2f")
+                data  = st.date_input("Data", value=date.today())
+                ok = st.form_submit_button("Registrar")
+
+            if ok:
+                if valor <= 0:
+                    st.error("Informe um valor maior que zero.")
+                else:
+                    try:
+                        with get_db() as db:
+                            uid = st.session_state.auth["user_id"] if "auth" in st.session_state else st.session_state.user.id
+                            mid = create_income(db, uid, float(valor), data.isoformat())
+                            split_income_by_buckets(db, uid, mid, float(valor))
+                            db.commit()
+                        st.success("✅ Registrado e dividido nos baldes.")
+                        st.toast("💸 Registrado!", icon="💸")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Falha ao registrar: {e}")
+                        db.close()
+                    st.cache_data.clear()
+                    st.rerun()
+                    
                     if valor <= 0:
                         st.error("Informe um valor maior que zero.")
-                        return
-
-                    with get_db() as new_db:  # Nova conexão
-                        # Tenta distribuir o valor
-                        if distribuir_por_baldes(new_db, user.id, valor, desc, date.today(), tipo):
-                            st.success(f"✅ {tipo} de {money_br(valor)} distribuída entre baldes.")
-                            st.toast("Transação registrada!", icon="💰")
-                            st.cache_data.clear()  # Limpa cache para atualizar valores
-                            time.sleep(0.5)  # Pequena pausa para feedback
-                            st.rerun()
-                        st.error("Selecione um balde para a despesa.")
-                        return
-
-                    try:
-                        # Usar a função distribuir_by_buckets para ambos os casos
-                        distribute_by_buckets(
-                            db=db, user_id=user.id, buckets=buckets,
-                            valor=valor, tipo=tipo, data_mov=date.today(),
-                            desc=desc, auto=(tipo == "Entrada"),
-                            bucket_id=(bucket_id if tipo == "Despesa" else None)
-                        )
-                                    kind="Receita",
-                                    amount=valor_balde,
-                                    description=f"{desc} (Distribuição: {perc:.1f}%)",
-                                    date=data_mov
-                                ))
-                                bucket.balance += valor_balde
-                            
-                            db.commit()
-                            
-                            # Mostrar detalhes da distribuição
-                            st.success(f"Receita de {money_br(valor)} distribuída entre os baldes!")
-                            st.write("📊 Distribuição realizada:")
-                            cols_dist = st.columns(3)
-                            for idx, bucket in enumerate(buckets):
-                                with cols_dist[idx % 3]:
-                                    perc_norm = (bucket.percent / total_percent) * 100
-                                    valor_dist = (valor * perc_norm) / 100
-                                    st.metric(
-                                        f"{bucket.name}",
-                                        money_br(valor_dist),
-                                        f"{perc_norm:.1f}%"
-                                    )
-                            st.rerun()
-                    else:  # Saída ou Retirada
-                        if bucket_id:
-                            bucket = next((b for b in buckets if b.id == bucket_id), None)
-                            if bucket and bucket.balance >= valor:
-                                mov = Movement(
-                                    user_id=user.id,
-                                    bucket_id=bucket_id,
-                                    kind="Despesa",
-                                    amount=valor,
-                                    description=f"{desc} ({tipo})",
-                                    date=data_mov
-                                )
-                                db.add(mov)
-                                
-                                # Atualizar saldo do balde
-                                if tipo == "Retirada":
-                                    bucket.balance -= valor
-                                    msg = f"Retirada de {money_br(valor)} registrada em {date_br(data_mov)}! Novo saldo do balde {bucket.name}: {money_br(bucket.balance)}"
-                                else:
-                                    bucket.balance -= valor
-                                    msg = f"Saída de {money_br(valor)} registrada em {date_br(data_mov)}! Novo saldo do balde {bucket.name}: {money_br(bucket.balance)}"
-                                
-                                db.commit()
-                                st.success(msg)
+                    else:
+                        with get_db() as new_db:  # Nova conexão
+                            # Tenta distribuir o valor
+                            if distribuir_por_baldes(new_db, user.id, valor, desc, date.today(), tipo):
+                                st.success(f"✅ {tipo} de {money_br(valor)} distribuída entre baldes.")
+                                st.toast("Transação registrada!", icon="💰")
+                                st.cache_data.clear()  # Limpa cache para atualizar valores
+                                time.sleep(0.5)  # Pequena pausa para feedback
                                 st.rerun()
                             else:
-                                st.error(f"Saldo insuficiente no balde {bucket.name if bucket else ''}")
-                        else:
-                            st.error("Selecione um balde para a operação")
-        
-        # Livro Caixa
-        elif menu == "Livro Caixa":
-            st.header("📚 Livro Caixa")
-            
-            # Botões de ação no topo
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-            with col1:
-                if st.button("🧹 Limpar Tudo"):
-                    if movements:
-                        st.session_state["confirmar_limpar"] = True
+                                st.error("Selecione um balde para a despesa.")
+
+
             with col2:
                 if movements:
                     csv = pd.DataFrame([
@@ -2495,24 +2784,7 @@ def main():
                             st.warning(f"{fail} não encontrado(s) ou já removido(s).")
                         st.cache_data.clear()
                         st.rerun()
-                            width="small",
-                        ),
-                        "Valor": st.column_config.TextColumn(
-                            "Valor",
-                            width="small",
-                        ),
-                        "Balde": st.column_config.TextColumn(
-                            "Balde",
-                            width="small",
-                        ),
-                        "Ações": st.column_config.Column(
-                            "Ações",
-                            width="small",
-                        ),
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                )
+
                 
                 # Handler para exclusão
                 clicked = st.button("Excluir Selecionado", type="secondary")

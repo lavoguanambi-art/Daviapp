@@ -30,6 +30,35 @@ div.stButton > button:hover {
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
+/* Dataframes: horizontal scroll on mobile, fixed header */
+[data-testid="stDataFrame"] div[role="table"] { overflow-x: auto; }
+[data-testid="stDataFrame"] { font-size: 14px; }
+
+/* Harmonized sidebar + visual "hamburger" */
+section[data-testid="stSidebar"] { width: min(86vw, 300px) !important; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] button { color: #1E40AF !important; }
+.stApp:before {
+    content: "☰";
+    position: fixed;
+    left: 14px;
+    top: 12px;
+    z-index: 999;
+    font-size: 22px;
+    color: #1E40AF;
+    opacity: .9;
+}
+
+/* Avoid overwriting native Safari icons */
+@supports (-webkit-touch-callout: none) {
+    .stApp:before { top: 10px; }
+}
+
+/* iOS/Safari dark mode: maintain contrast */
+@media (prefers-color-scheme: dark) {
+    body { background: #0b0f15 !important; }
+}
+}
+
 /* Sidebar */
 [data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
     width: 250px;

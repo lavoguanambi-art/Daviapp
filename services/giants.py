@@ -1,11 +1,16 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from models import Giant
 
 def delete_giant(db: Session, giant_id: int, user_id: int) -> bool:
-    q = db.query(Giant).filter(Giant.id == giant_id, Giant.user_id == user_id)
-    if not db.query(q.exists()).scalar():
+    try:
+        gid = int(giant_id)
+    except Exception:
         return False
-    q.delete(synchronize_session=False)
+    exists = db.execute(select(Giant.id).where(Giant.id==gid, Giant.user_id==user_id)).first()
+    if not exists:
+        return False
+    db.query(Giant).filter(Giant.id==gid, Giant.user_id==user_id).delete(synchronize_session=False)
     try:
         db.commit()
         return True
